@@ -85,16 +85,24 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // CORS (FIXED)
-  // - if credentials=true => ACAO MUST NOT be "*"
-  // - MUST echo exact Origin
+  // CORS (TOKEN-ONLY FIX)
+  // - frontend radi token-only (Authorization header)
+  // - fetch u clientu je credentials:"omit"
+  // - ZATO: credentials:false ovde, i nema "* vs credentials" errora
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
+  // auto include FRONTEND_URL if set
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
+
+  // IMPORTANT: caches must not mix origins
+  app.use((req, res, next) => {
+    res.setHeader("Vary", "Origin");
+    next();
+  });
 
   const corsOptions = {
     origin(origin, cb) {
@@ -102,7 +110,7 @@ export function createApp({ corsOrigins = [] } = {}) {
       if (!origin) return cb(null, true);
 
       // block file:// or sandboxed null origins
-      if (origin === "null") return cb(new Error("CORS: null origin"));
+      if (origin === "null") return cb(null, false);
 
       const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
 
@@ -112,13 +120,12 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ CRITICAL: echo exact origin (never 'true' here)
-      return cb(null, origin);
+      // ✅ allow (cors middleware će echo exact origin)
+      return cb(null, true);
     },
 
-    // If ANY request uses cookies/session (or browser sends credentials),
-    // we must support it safely. This will also satisfy Firefox errors.
-    credentials: true,
+    // ✅ TOKEN-ONLY: NO COOKIES
+    credentials: false,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
@@ -134,17 +141,11 @@ export function createApp({ corsOrigins = [] } = {}) {
     optionsSuccessStatus: 204,
   };
 
-  // IMPORTANT: add Vary: Origin so caches don't mix CORS responses
-  app.use((req, res, next) => {
-    res.header("Vary", "Origin");
-    next();
-  });
-
   app.use(cors(corsOptions));
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES
+  // COOKIES (može ostati, ali se cross-site ne koristi kad credentials:false)
   // =====================================================
   app.use(cookieParser());
 
@@ -191,7 +192,9 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use("/api", dashboardRoutes);
 
   app.use("/orders", ordersRoutes);
-  app.use("/orders", ordersSyncRoutes);
+  // ✅ FIX: ne mountuj dva puta isti base
+  app.use("/orders/sync", ordersSyncRoutes);
+
   app.use("/wallet", walletRoutes);
 
   // =====================================================
