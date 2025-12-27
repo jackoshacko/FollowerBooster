@@ -1,7 +1,7 @@
 // client/src/pages/Register.jsx
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api } from "../lib/api.js";
+import { api, apiUrl } from "../lib/api.js";
 
 import bg from "../assets/bg.jpg";
 
@@ -24,17 +24,18 @@ export default function Register() {
         password,
       });
 
-      // Backend /auth/register ne vraća accessToken u tvom kodu -> vodi na login
+      // backend register ne vraća token -> idi na login
       nav("/login", { replace: true });
     } catch (e) {
-      setErr(e.message || "Register failed");
+      setErr(e?.message || "Register failed");
     } finally {
       setLoading(false);
     }
   }
 
   function googleLogin() {
-    window.location.href = "http://localhost:5000/auth/google";
+    // ✅ koristi isti backend base kao app (ngrok/prod), ne localhost
+    window.location.href = apiUrl("/auth/google");
   }
 
   // UI helpers

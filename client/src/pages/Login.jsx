@@ -1,7 +1,7 @@
 // client/src/pages/Login.jsx
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { api, setToken } from "../api.js";
+import { api, setToken, apiUrl } from "../lib/api.js";
 
 import bg from "../assets/bg.jpg";
 
@@ -20,6 +20,7 @@ export default function Login() {
     setLoading(true);
 
     try {
+      // login
       const data = await api.post("/auth/login", { email, password });
 
       // token
@@ -27,44 +28,34 @@ export default function Login() {
       if (!accessToken) throw new Error("Login response missing accessToken");
 
       setToken(accessToken);
+      window.dispatchEvent(new Event("auth-changed"));
 
-      // user (ako backend vraća user, super)
-      if (data?.user) {
-        localStorage.setItem("user", JSON.stringify(data.user));
-      }
-
-      // role - probaj prvo iz login response, ako nema -> /auth/me
+      // user/role
+      let user = data?.user || null;
       let role = data?.user?.role || data?.role || "";
-      if (!role) {
-        try {
-          const me = await api.get("/auth/me");
-          role = me?.role || "";
-          // korisno da sidebar/RequireAdmin zna odmah
-          localStorage.setItem("user", JSON.stringify(me));
-        } catch {
-          // ako /auth/me padne, treat kao user
-          role = "user";
-        }
+
+      // ako login ne vraća user/role → povuci /api/me (token-only)
+      if (!role || !user) {
+        const me = await api.get("/api/me");
+        user = me || user;
+        role = me?.role || role || "user";
       }
 
+      if (user) localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("role", role || "user");
 
-      // ===== Redirect logic (OVO TI JE FIX) =====
+      // redirect
       const fromPath = loc.state?.from?.pathname || "/dashboard";
       const isAdminRoute = String(fromPath).startsWith("/admin");
 
-      // ako nije admin, a pokušao je admin rutu, šalji ga normalno u app
       if (isAdminRoute && role !== "admin") {
         nav("/dashboard", { replace: true });
         return;
       }
 
-      // default: vrati ga gde je bio (ili /dashboard)
-      // (nikad ne šalji na "/" jer "/" može da bude zbrka sa guard-ovima)
       nav(fromPath === "/" ? "/dashboard" : fromPath, { replace: true });
     } catch (e2) {
       setErr(e2?.message || "Login failed");
-      // očisti sve ako fail
       localStorage.removeItem("token");
       localStorage.removeItem("role");
       localStorage.removeItem("user");
@@ -74,7 +65,8 @@ export default function Login() {
   }
 
   function googleLogin() {
-    window.location.href = "http://localhost:5000/auth/google";
+    // ✅ koristi isti backend base kao i ostatak app-a (ngrok/prod)
+    window.location.href = apiUrl("/auth/google");
   }
 
   // UI helpers (micro-interactions)
@@ -297,3 +289,4 @@ const styles = {
     opacity: 0.8,
   },
 };
+
