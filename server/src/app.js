@@ -24,8 +24,6 @@ import adminRoutes from "./routes/admin.routes.js";
 import adminServicesRoutes from "./routes/admin.services.routes.js";
 import adminBalanceRoutes from "./routes/admin.balance.routes.js";
 import adminPaypalPaymentsRoutes from "./routes/admin.payments.paypal.routes.js";
-
-// ✅ ADMIN PROVIDER (sync / balance)
 import adminProviderRoutes from "./routes/admin.provider.routes.js";
 
 // ================= MIDDLEWARES =================
@@ -44,14 +42,11 @@ function isAllowedByPattern(origin) {
     const u = new URL(origin);
     const host = u.hostname;
 
-    // allow localhost dev
+    // dev
     if (host === "localhost" || host === "127.0.0.1") return true;
 
-    // allow vercel (prod + preview)
+    // vercel prod + preview
     if (host.endsWith(".vercel.app")) return true;
-
-    // allow ngrok
-    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
 
     return false;
   } catch {
@@ -86,49 +81,49 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // CORS (HARD FIX)
+  // CORS (TOKEN-ONLY, NO COOKIES)
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
+  // Ako koristiš env FRONTEND_URL, dodaj i njega automatski:
+  const envFrontend = String(process.env.FRONTEND_URL || "").trim();
+  if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
+
   const corsOptions = {
     origin(origin, cb) {
-      // ✅ IMPORTANT:
-      // Ako nema Origin header (server-to-server), NE dodaj CORS headere
-      // (da ne završi kao "*", pa credentials pukne).
+      // bez Origin header-a (curl/postman) -> ne dodaj CORS headere
       if (!origin) return cb(null, false);
 
-      // nekad dođe "null" origin (sandbox / file://)
-      if (origin === "null") return cb(null, true);
+      // "null" origin (file://) - uglavnom ne treba, ali ostavi true ako hoćeš
+      if (origin === "null") return cb(null, false);
 
-      if (whitelist.includes(origin)) return cb(null, true);
-      if (isAllowedByPattern(origin)) return cb(null, true);
+      const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
+      if (!allowed) {
+        console.error("❌ CORS blocked:", origin, "whitelist:", whitelist);
+        return cb(new Error("Not allowed by CORS: " + origin));
+      }
 
-      console.error("❌ CORS blocked:", origin);
-      return cb(new Error("Not allowed by CORS: " + origin));
+      // ✅ NAJSIGURNIJE: vrati TAČAN origin string (nikad "*")
+      return cb(null, origin);
     },
-    credentials: true,
+
+    // ✅ token-only: nema cookies → credentials false
+    credentials: false,
+
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "X-Requested-With",
-      "x-request-id",
-      "Accept",
-      "Origin",
-    ],
+    allowedHeaders: ["Content-Type", "Authorization", "x-request-id", "Accept"],
     exposedHeaders: ["x-request-id"],
     maxAge: 86400,
     optionsSuccessStatus: 204,
   };
 
   app.use(cors(corsOptions));
-  // ✅ preflight mora koristiti ISTE opcije (ne cors() bez args)
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES
+  // COOKIES (može ostati, ali CORS ne šalje cookies u prod)
   // =====================================================
   app.use(cookieParser());
 
@@ -153,6 +148,7 @@ export function createApp({ corsOrigins = [] } = {}) {
       env: process.env.NODE_ENV || "development",
       time: new Date().toISOString(),
       reqId: req.reqId,
+      corsWhitelist: whitelist,
     });
   });
 

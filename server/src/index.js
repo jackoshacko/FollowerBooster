@@ -8,18 +8,21 @@ import { startTransactionsJob } from "./jobs/transactions.job.js";
 const PORT = Number(process.env.PORT || 5000);
 
 /**
- * Parsira CORS_ORIGIN iz .env
- * Format:
+ * CORS_ORIGIN u .env:
  * CORS_ORIGIN=http://localhost:5173,http://localhost:3000,https://xxx.vercel.app
  */
 function parseCorsOrigins() {
-  const raw = (process.env.CORS_ORIGIN || "").trim();
+  const raw = String(process.env.CORS_ORIGIN || "").trim();
   if (!raw) return [];
 
   return raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function uniq(arr) {
+  return Array.from(new Set(arr.filter(Boolean)));
 }
 
 async function bootstrap() {
@@ -30,13 +33,31 @@ async function bootstrap() {
   console.log("✅ MongoDB connected");
 
   // =========================
-  // CORS ORIGINS
+  // CORS ORIGINS (STRICT LIST + app.js pattern allow)
   // =========================
-  const corsOrigins = parseCorsOrigins();
+  const envCors = parseCorsOrigins();
 
-  console.log("🌍 Allowed CORS origins:");
+  // FRONTEND_URL (glavni prod URL na Vercelu)
+  const frontendUrl = String(process.env.FRONTEND_URL || "").trim();
+
+  // dev local origins
+  const devOrigins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+  ];
+
+  // Napravi final listu
+  const corsOrigins = uniq([
+    ...devOrigins,
+    ...envCors,
+    frontendUrl,
+  ]);
+
+  console.log("🌍 Allowed CORS origins (explicit list):");
   if (corsOrigins.length === 0) {
-    console.log("  - (none from env, using pattern-based allow in app.js)");
+    console.log("  - (none) -> app.js will still allow *.vercel.app by pattern");
   } else {
     corsOrigins.forEach((o) => console.log("  -", o));
   }

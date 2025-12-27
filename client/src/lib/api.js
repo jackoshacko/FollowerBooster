@@ -1,3 +1,4 @@
+// client/src/lib/api.js
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* ================= URL HELPERS ================= */
@@ -6,7 +7,7 @@ export function apiUrl(path = "") {
   return `${API}${path}`;
 }
 
-/* ================= TOKEN HELPERS ================= */
+/* ================= TOKEN + USER HELPERS ================= */
 
 export function getToken() {
   return localStorage.getItem("token") || "";
@@ -28,6 +29,12 @@ export function getUser() {
 export function setUser(user) {
   if (user) localStorage.setItem("user", JSON.stringify(user));
   else localStorage.removeItem("user");
+}
+
+export function clearAuthLocal() {
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
+  localStorage.removeItem("role");
 }
 
 function redirectToLogin() {
@@ -56,7 +63,7 @@ function pickErrorMessage(json, textFallback = "") {
   );
 }
 
-/* ================= CORE REQUEST ================= */
+/* ================= CORE REQUEST (TOKEN-ONLY) ================= */
 
 export async function request(path, options = {}) {
   const token = getToken();
@@ -70,15 +77,13 @@ export async function request(path, options = {}) {
     },
   });
 
-  // nekad backend vrati HTML/text (error page) → nećemo da crashujemo
+  // backend nekad vrati HTML/text (npr. error page)
   const data = await safeJson(res);
   const text = data === null ? await safeText(res) : "";
 
-  // 401 → token expired / invalid
+  // 401 → token invalid/expired
   if (res.status === 401) {
-    setToken("");
-    // user cleanup (optional)
-    // setUser(null);
+    clearAuthLocal();
     redirectToLogin();
     throw new Error(pickErrorMessage(data, "Unauthorized"));
   }
@@ -91,7 +96,7 @@ export async function request(path, options = {}) {
   return data ?? (text ? { text } : {});
 }
 
-// kad baš želiš plain text (npr. health check)
+// kad želiš plain text (npr. health check)
 export async function requestText(path, options = {}) {
   const token = getToken();
 
@@ -106,7 +111,7 @@ export async function requestText(path, options = {}) {
   const text = await safeText(res);
 
   if (res.status === 401) {
-    setToken("");
+    clearAuthLocal();
     redirectToLogin();
     throw new Error("Unauthorized");
   }
@@ -127,9 +132,9 @@ export const api = {
   put: (p, b) => request(p, { method: "PUT", body: JSON.stringify(b) }),
   del: (p) => request(p, { method: "DELETE" }),
 
-  /* ---- misc / debug ---- */
-  health: () => requestText("/"), // ako backend ima health page ili root
+  /* ---- misc ---- */
   me: () => request("/api/me"),
+  health: () => requestText("/health"),
 
   /* ---- auth ---- */
   login: (payload) =>
@@ -145,14 +150,13 @@ export const api = {
     }),
 
   logoutLocal: () => {
-    setToken("");
-    // setUser(null);
+    clearAuthLocal();
     redirectToLogin();
   },
 
   /* ---- services ---- */
-  servicesPublic: () => request("/services"), // enabled only
-  servicesAdmin: () => request("/admin/services"), // full list (admin)
+  servicesPublic: () => request("/services"),
+  servicesAdmin: () => request("/admin/services"),
 
   createService: (payload) =>
     request("/admin/services", {
@@ -190,7 +194,6 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // (opciono) ako imaš endpoint za capture
   paypalCapture: (payload) =>
     request("/payments/paypal/capture", {
       method: "POST",
