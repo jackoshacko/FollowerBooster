@@ -42,9 +42,14 @@ function isAllowedByPattern(origin) {
     const u = new URL(origin);
     const host = u.hostname;
 
-    if (host === "localhost" || host === "127.0.0.1") return true;     // dev
-    if (host.endsWith(".vercel.app")) return true;                      // vercel
-    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true; // ngrok
+    // dev
+    if (host === "localhost" || host === "127.0.0.1") return true;
+
+    // vercel previews + prod
+    if (host.endsWith(".vercel.app")) return true;
+
+    // ngrok
+    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
 
     return false;
   } catch {
@@ -79,8 +84,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // CORS (REAL FIX)
-  // - credentials=true => MUST echo exact Origin (NE "*", NE true)
+  // CORS (TOKEN-ONLY)
+  // - NO cookies => credentials MUST be false
+  // - MUST NOT use "*" if you ever set credentials true (we don't)
+  // - Vary: Origin for caches
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
@@ -89,14 +96,15 @@ export function createApp({ corsOrigins = [] } = {}) {
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
-  // cache safety
   app.use((req, res, next) => {
+    // allow caches/CDNs to vary response per Origin
     res.setHeader("Vary", "Origin");
     next();
   });
 
   const corsOptions = {
     origin(origin, cb) {
+      // server-to-server / curl has no origin -> allow
       if (!origin) return cb(null, true);
       if (origin === "null") return cb(new Error("CORS: null origin"));
 
@@ -107,12 +115,12 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ najbitnije: vrati TAČAN origin string
+      // echo exact origin
       return cb(null, origin);
     },
 
-    // ✅ ovo rešava tvoj error "expected true"
-    credentials: true,
+    // ✅ TOKEN-ONLY => NO COOKIES
+    credentials: false,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
@@ -129,10 +137,17 @@ export function createApp({ corsOrigins = [] } = {}) {
   };
 
   app.use(cors(corsOptions));
-  app.options("*", cors(corsOptions));
+
+  // ✅ Preflight handler (bez app.options("*"...))
+  app.use((req, res, next) => {
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
 
   // =====================================================
-  // COOKIES (može ostati)
+  // COOKIES
+  // (može ostati za refresh token, ali FE ga ne šalje jer je credentials:omit)
+  // Ako želiš 100% token-only, možeš i ovo izbaciti.
   // =====================================================
   app.use(cookieParser());
 
@@ -179,7 +194,6 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use("/api", dashboardRoutes);
 
   app.use("/orders", ordersRoutes);
-  // ✅ izbegni dupli mount na /orders
   app.use("/orders/sync", ordersSyncRoutes);
 
   app.use("/wallet", walletRoutes);
