@@ -42,14 +42,9 @@ function isAllowedByPattern(origin) {
     const u = new URL(origin);
     const host = u.hostname;
 
-    // dev
-    if (host === "localhost" || host === "127.0.0.1") return true;
-
-    // vercel prod + preview
-    if (host.endsWith(".vercel.app")) return true;
-
-    // ngrok (free + legacy)
-    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
+    if (host === "localhost" || host === "127.0.0.1") return true;     // dev
+    if (host.endsWith(".vercel.app")) return true;                      // vercel
+    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true; // ngrok
 
     return false;
   } catch {
@@ -80,25 +75,21 @@ export function createApp({ corsOrigins = [] } = {}) {
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
-
     next();
   });
 
   // =====================================================
-  // CORS (TOKEN-ONLY FIX)
-  // - frontend radi token-only (Authorization header)
-  // - fetch u clientu je credentials:"omit"
-  // - ZATO: credentials:false ovde, i nema "* vs credentials" errora
+  // CORS (REAL FIX)
+  // - credentials=true => MUST echo exact Origin (NE "*", NE true)
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
-  // auto include FRONTEND_URL if set
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
-  // IMPORTANT: caches must not mix origins
+  // cache safety
   app.use((req, res, next) => {
     res.setHeader("Vary", "Origin");
     next();
@@ -106,26 +97,22 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   const corsOptions = {
     origin(origin, cb) {
-      // server-to-server/curl (no Origin header) -> allow
       if (!origin) return cb(null, true);
-
-      // block file:// or sandboxed null origins
-      if (origin === "null") return cb(null, false);
+      if (origin === "null") return cb(new Error("CORS: null origin"));
 
       const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
-
       if (!allowed) {
         console.error("❌ CORS blocked:", origin);
         console.error("   whitelist:", whitelist);
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ allow (cors middleware će echo exact origin)
-      return cb(null, true);
+      // ✅ najbitnije: vrati TAČAN origin string
+      return cb(null, origin);
     },
 
-    // ✅ TOKEN-ONLY: NO COOKIES
-    credentials: false,
+    // ✅ ovo rešava tvoj error "expected true"
+    credentials: true,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
@@ -145,7 +132,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES (može ostati, ali se cross-site ne koristi kad credentials:false)
+  // COOKIES (može ostati)
   // =====================================================
   app.use(cookieParser());
 
@@ -192,7 +179,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use("/api", dashboardRoutes);
 
   app.use("/orders", ordersRoutes);
-  // ✅ FIX: ne mountuj dva puta isti base
+  // ✅ izbegni dupli mount na /orders
   app.use("/orders/sync", ordersSyncRoutes);
 
   app.use("/wallet", walletRoutes);
