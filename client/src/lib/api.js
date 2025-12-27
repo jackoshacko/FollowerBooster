@@ -2,13 +2,11 @@
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* ================= URL HELPERS ================= */
-
 export function apiUrl(path = "") {
   return `${API}${path}`;
 }
 
 /* ================= TOKEN + USER HELPERS ================= */
-
 export function getToken() {
   return localStorage.getItem("token") || "";
 }
@@ -44,13 +42,20 @@ function redirectToLogin() {
 }
 
 /* ================= CORE PARSERS ================= */
-
 async function safeJson(res) {
-  return await res.json().catch(() => null);
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 async function safeText(res) {
-  return await res.text().catch(() => "");
+  try {
+    return await res.text();
+  } catch {
+    return "";
+  }
 }
 
 function pickErrorMessage(json, textFallback = "") {
@@ -64,20 +69,29 @@ function pickErrorMessage(json, textFallback = "") {
 }
 
 /* ================= CORE REQUEST (TOKEN-ONLY) ================= */
-
 export async function request(path, options = {}) {
   const token = getToken();
 
+  const method = (options.method || "GET").toUpperCase();
+  const hasBody = options.body != null; // body već dolazi kao string u tvom wrapperu
+
+  // headers: Content-Type samo kad ima body
+  const headers = {
+    ...(hasBody ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  };
+
   const res = await fetch(apiUrl(path), {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    },
+    method,
+    headers,
+
+    // ✅ HARD FIX: token-only => NO cookies => nema Allow-Credentials drama
+    credentials: "omit",
   });
 
-  // backend nekad vrati HTML/text (npr. error page)
+  // backend nekad vrati HTML/text
   const data = await safeJson(res);
   const text = data === null ? await safeText(res) : "";
 
@@ -106,6 +120,9 @@ export async function requestText(path, options = {}) {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
+
+    // ✅ isto ovde
+    credentials: "omit",
   });
 
   const text = await safeText(res);
@@ -124,7 +141,6 @@ export async function requestText(path, options = {}) {
 }
 
 /* ================= API WRAPPER ================= */
-
 export const api = {
   /* ---- generic ---- */
   get: (p) => request(p),
@@ -137,17 +153,8 @@ export const api = {
   health: () => requestText("/health"),
 
   /* ---- auth ---- */
-  login: (payload) =>
-    request("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  register: (payload) =>
-    request("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  login: (payload) => request("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+  register: (payload) => request("/auth/register", { method: "POST", body: JSON.stringify(payload) }),
 
   logoutLocal: () => {
     clearAuthLocal();
@@ -158,45 +165,18 @@ export const api = {
   servicesPublic: () => request("/services"),
   servicesAdmin: () => request("/admin/services"),
 
-  createService: (payload) =>
-    request("/admin/services", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  updateService: (id, payload) =>
-    request(`/admin/services/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-
-  deleteService: (id) =>
-    request(`/admin/services/${id}`, {
-      method: "DELETE",
-    }),
+  createService: (payload) => request("/admin/services", { method: "POST", body: JSON.stringify(payload) }),
+  updateService: (id, payload) => request(`/admin/services/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteService: (id) => request(`/admin/services/${id}`, { method: "DELETE" }),
 
   /* ---- orders ---- */
-  createOrder: (payload) =>
-    request("/orders", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
+  createOrder: (payload) => request("/orders", { method: "POST", body: JSON.stringify(payload) }),
   myOrders: () => request("/orders"),
 
   /* ---- wallet ---- */
   wallet: () => request("/wallet"),
 
   /* ---- payments: PayPal ---- */
-  paypalCreate: (payload) =>
-    request("/payments/paypal/create", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  paypalCapture: (payload) =>
-    request("/payments/paypal/capture", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: JSON.stringify(payload) }),
+  paypalCapture: (payload) => request("/payments/paypal/capture", { method: "POST", body: JSON.stringify(payload) }),
 };
