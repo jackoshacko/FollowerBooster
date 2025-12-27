@@ -80,29 +80,29 @@ export function createApp({ corsOrigins = [] } = {}) {
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
+
     next();
   });
 
   // =====================================================
-  // CORS (HARD FIX) - token-only (no cookies)
+  // CORS (FIXED)
+  // - if credentials=true => ACAO MUST NOT be "*"
+  // - MUST echo exact Origin
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
-  // auto include FRONTEND_URL if set
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
   const corsOptions = {
     origin(origin, cb) {
-      // ✅ IMPORTANT:
-      // If no Origin (curl/postman/server-to-server), just allow.
-      // Returning false here can cause weird "NetworkError" in some flows.
+      // server-to-server/curl (no Origin header) -> allow
       if (!origin) return cb(null, true);
 
-      // block file:// null origins (safer)
-      if (origin === "null") return cb(null, false);
+      // block file:// or sandboxed null origins
+      if (origin === "null") return cb(new Error("CORS: null origin"));
 
       const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
 
@@ -112,11 +112,12 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ return true (CORS middleware will echo the exact origin)
-      return cb(null, true);
+      // ✅ CRITICAL: echo exact origin (never 'true' here)
+      return cb(null, origin);
     },
 
-    // TOKEN-ONLY: no cookies across domains
+    // If ANY request uses cookies/session (or browser sends credentials),
+    // we must support it safely. This will also satisfy Firefox errors.
     credentials: true,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -133,11 +134,17 @@ export function createApp({ corsOrigins = [] } = {}) {
     optionsSuccessStatus: 204,
   };
 
+  // IMPORTANT: add Vary: Origin so caches don't mix CORS responses
+  app.use((req, res, next) => {
+    res.header("Vary", "Origin");
+    next();
+  });
+
   app.use(cors(corsOptions));
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES (can stay, but not used cross-site when credentials=false)
+  // COOKIES
   // =====================================================
   app.use(cookieParser());
 
