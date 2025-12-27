@@ -48,6 +48,9 @@ function isAllowedByPattern(origin) {
     // vercel prod + preview
     if (host.endsWith(".vercel.app")) return true;
 
+    // ngrok (free + legacy)
+    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
+
     return false;
   } catch {
     return false;
@@ -81,39 +84,50 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // CORS (TOKEN-ONLY, NO COOKIES)
+  // CORS (HARD FIX) - token-only (no cookies)
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
-  // Ako koristiš env FRONTEND_URL, dodaj i njega automatski:
+  // auto include FRONTEND_URL if set
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
   const corsOptions = {
     origin(origin, cb) {
-      // bez Origin header-a (curl/postman) -> ne dodaj CORS headere
-      if (!origin) return cb(null, false);
+      // ✅ IMPORTANT:
+      // If no Origin (curl/postman/server-to-server), just allow.
+      // Returning false here can cause weird "NetworkError" in some flows.
+      if (!origin) return cb(null, true);
 
-      // "null" origin (file://) - uglavnom ne treba, ali ostavi true ako hoćeš
+      // block file:// null origins (safer)
       if (origin === "null") return cb(null, false);
 
       const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
+
       if (!allowed) {
-        console.error("❌ CORS blocked:", origin, "whitelist:", whitelist);
+        console.error("❌ CORS blocked:", origin);
+        console.error("   whitelist:", whitelist);
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ NAJSIGURNIJE: vrati TAČAN origin string (nikad "*")
-      return cb(null, origin);
+      // ✅ return true (CORS middleware will echo the exact origin)
+      return cb(null, true);
     },
 
-    // ✅ token-only: nema cookies → credentials false
+    // TOKEN-ONLY: no cookies across domains
     credentials: false,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-request-id", "Accept"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-request-id",
+      "Accept",
+      "Origin",
+    ],
     exposedHeaders: ["x-request-id"],
     maxAge: 86400,
     optionsSuccessStatus: 204,
@@ -123,7 +137,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES (može ostati, ali CORS ne šalje cookies u prod)
+  // COOKIES (can stay, but not used cross-site when credentials=false)
   // =====================================================
   app.use(cookieParser());
 
@@ -217,6 +231,4 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   return app;
 }
-
-
 
