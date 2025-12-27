@@ -12,7 +12,7 @@ import servicesRoutes from "./routes/services.routes.js";
 import meRoutes from "./routes/me.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import ordersRoutes from "./routes/orders.routes.js";
-import ordersSyncRoutes from "./routes/orders.syncRoutes.js";
+import ordersSyncRoutes from "./routes/orders.sync.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 
 // ================= PAYMENTS (USER) =================
