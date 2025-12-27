@@ -117,7 +117,7 @@ export function createApp({ corsOrigins = [] } = {}) {
     },
 
     // TOKEN-ONLY: no cookies across domains
-    credentials: false,
+    credentials: true,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
