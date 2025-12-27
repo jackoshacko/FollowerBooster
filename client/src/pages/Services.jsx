@@ -1,3 +1,4 @@
+// client/src/pages/Services.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import { useNavigate } from "react-router-dom";
@@ -7,7 +8,6 @@ import {
   Copy,
   Info,
   ShoppingCart,
-  Filter,
   Grid2X2,
   List,
   Sparkles,
@@ -26,8 +26,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 
-// Optional texture (if you want same vibe as dashboard):
-// import bgSmm2 from "../assets/backgroundsmm2.jpg";
+/* ------------------------------ labels ------------------------------ */
 
 const PLATFORM_LABEL = {
   instagram: "Instagram",
@@ -35,11 +34,15 @@ const PLATFORM_LABEL = {
   youtube: "YouTube",
   facebook: "Facebook",
   twitter: "Twitter/X",
+  "twitter/x": "Twitter/X",
+  x: "Twitter/X",
   telegram: "Telegram",
   spotify: "Spotify",
   snapchat: "Snapchat",
   discord: "Discord",
   website: "Website Traffic",
+  "website traffic": "Website Traffic",
+  web: "Website Traffic",
   other: "Other",
 };
 
@@ -113,33 +116,12 @@ function GlassCard({ children, className = "" }) {
         className
       )}
     >
-      {/* subtle gradients */}
       <div className="pointer-events-none absolute inset-0">
-        {/* If you want texture: */}
-        {/* <div className="absolute inset-0 bg-cover bg-center opacity-[0.18]" style={{ backgroundImage: `url(${bgSmm2})` }} /> */}
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-black/35" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/25 via-transparent to-black/25" />
       </div>
       <div className="relative">{children}</div>
     </div>
-  );
-}
-
-function PlatformChip({ label, active, count, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition",
-        active
-          ? "border-amber-500/40 bg-amber-500/10 text-amber-100"
-          : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
-      )}
-      title={`${count} services`}
-    >
-      <span className="font-semibold">{label}</span>
-      <span className={cn("text-xs opacity-75", active ? "" : "text-zinc-300")}>{count}</span>
-    </button>
   );
 }
 
@@ -169,7 +151,6 @@ function Segmented({ value, onChange }) {
 }
 
 function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
-  // super-simple dual range UI (two sliders)
   return (
     <div className="flex items-center gap-2">
       <div className="text-xs text-zinc-200/70 w-10">{money2(valueMin)}€</div>
@@ -194,32 +175,87 @@ function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
   );
 }
 
-/* ------------------------------ data normalize ------------------------------ */
+/* ------------------------------ data normalize (FIXED) ------------------------------ */
+
+// heuristika: iz category izvući platform label ako backend ne daje "platform"
+function inferPlatformFromCategory(cat) {
+  const c = toLc(cat);
+  if (!c) return "Other";
+  if (c.includes("insta")) return "Instagram";
+  if (c.includes("tiktok") || c === "tt") return "TikTok";
+  if (c.includes("youtube") || c.includes("yt")) return "YouTube";
+  if (c.includes("facebook") || c.includes("fb")) return "Facebook";
+  if (c.includes("twitter") || c.includes("x ")) return "Twitter/X";
+  if (c.includes("telegram") || c.includes("tg")) return "Telegram";
+  if (c.includes("spotify")) return "Spotify";
+  if (c.includes("snapchat")) return "Snapchat";
+  if (c.includes("discord")) return "Discord";
+  if (c.includes("website") || c.includes("traffic") || c.includes("seo")) return "Website Traffic";
+  return "Other";
+}
 
 function normalizeService(s) {
-  const rate = s?.pricePer1000 ?? s?.rate ?? 0;
-  const min = s?.min ?? s?.minOrder ?? 0;
-  const max = s?.max ?? s?.maxOrder ?? 0;
+  // id: seed format (_id) OR provider format (service) OR generic (id)
+  const externalId =
+    s?.externalServiceId ??
+    s?.providerServiceId ??
+    s?.service ?? // provider standard
+    s?.service_id ??
+    s?.id ??
+    null;
+
+  const id =
+    s?._id ||
+    s?.id ||
+    (externalId != null ? String(externalId) : "");
+
+  // rate/min/max variants
+  const rateRaw =
+    s?.pricePer1000 ??
+    s?.rate ??
+    s?.price ??
+    s?.price_per_1000 ??
+    0;
+
+  const minRaw = s?.min ?? s?.minOrder ?? s?.min_order ?? 0;
+  const maxRaw = s?.max ?? s?.maxOrder ?? s?.max_order ?? 0;
+
+  // category/name variants
+  const category = (s?.category || s?.type || "Other").toString().trim() || "Other";
+  const name = s?.name || s?.title || `Service ${String(externalId ?? id).slice(-6)}` || "—";
+
+  // platform:
+  // 1) explicit s.platform (seed)
+  // 2) infer from category (provider)
+  // 3) fallback Other
+  const platform =
+    s?.platform ? platformToLabel(s.platform) : inferPlatformFromCategory(category);
 
   return {
     ...s,
-    _id: String(s?._id || ""),
-    name: s?.name || "—",
+    _id: String(id || ""), // always string id for React keys
+    name,
     description: s?.description || "",
-    category: (s?.category || "Other").trim() || "Other",
-    platform: platformToLabel(s?.platform),
+    category,
+    platform,
     type: s?.type || "other",
-    rate: safeNum(rate, 0), // €/1000
-    min: safeNum(min, 0),
-    max: safeNum(max, 0),
+    rate: safeNum(rateRaw, 0), // €/1000
+    min: safeNum(minRaw, 0),
+    max: safeNum(maxRaw, 0),
     enabled: s?.enabled !== false,
 
-    externalServiceId: s?.externalServiceId ?? s?.providerServiceId ?? null,
+    // provider connection:
+    externalServiceId: externalId,
     provider: s?.provider || "default",
   };
 }
 
 /* ------------------------------ modal ------------------------------ */
+
+function fmtRange(min, max) {
+  if (!min && !max) return "—";
+  return `${min || "—"} / ${max || "—"}`;
+}
 
 function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }) {
   if (!open) return null;
@@ -258,7 +294,9 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                   onClick={() => toggleFav(s._id)}
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition",
-                    isFav ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
+                    isFav
+                      ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                      : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
                   )}
                   title={isFav ? "Unfavorite" : "Favorite"}
                 >
@@ -294,9 +332,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-zinc-200/60">Limits</div>
-              <div className="mt-1 text-lg font-black text-white">
-                {fmtRange(s.min, s.max)}
-              </div>
+              <div className="mt-1 text-lg font-black text-white">{fmtRange(s.min, s.max)}</div>
               <div className="text-xs text-zinc-200/60">min / max</div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -370,11 +406,6 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
       </GlassCard>
     </div>
   );
-}
-
-function fmtRange(min, max) {
-  if (!min && !max) return "—";
-  return `${min || "—"} / ${max || "—"}`;
 }
 
 /* ------------------------------ service cards ------------------------------ */
@@ -451,7 +482,6 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
     );
   }
 
-  // GRID card (masonry)
   return (
     <GlassCard className="p-4 group">
       <div className="flex items-start justify-between gap-3">
@@ -495,7 +525,6 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
         </div>
       </div>
 
-      {/* hover actions */}
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="text-xs text-zinc-200/60">id …{String(s._id).slice(-6)}</div>
 
@@ -540,7 +569,6 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
         </div>
       </div>
 
-      {/* micro “featured” hint */}
       <div className="mt-3 hidden text-xs text-zinc-200/50 group-hover:block">
         Featured ranks connected services first. Perfect for scaling.
       </div>
@@ -581,22 +609,18 @@ export default function Services() {
   const [platform, setPlatform] = useState("Instagram");
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
-  const [sort, setSort] = useState("featured"); // featured | price_asc | price_desc | name_asc
-  const [view, setView] = useState("grid"); // grid | list
+  const [sort, setSort] = useState("featured");
+  const [view, setView] = useState("grid");
   const [onlyConnected, setOnlyConnected] = useState(false);
 
-  // price filter (per 1000)
   const [price, setPrice] = useState({ min: 0, max: 50 });
 
-  // modal
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeService, setActiveService] = useState(null);
 
-  // toast
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
-  // favorites
   const [favs, setFavs] = useState(() => loadFavs());
 
   const platforms = useMemo(
@@ -639,12 +663,22 @@ export default function Services() {
       setLoading(true);
       setErr("");
       try {
-        const res = await api.servicesPublic(); // enabled only
+        const res = await api.servicesPublic(); // enabled only OR provider list
         const list = Array.isArray(res) ? res : res?.services || [];
-        const norm = list.map(normalizeService);
+        const norm = list.map(normalizeService).filter((x) => x._id); // drop invalid
         if (mounted) setItems(norm);
 
-        // auto-set price range based on data (2050 smart)
+        // auto-set platform if current selected has 0
+        if (mounted) {
+          const counts = new Map(platforms.map((p) => [p, 0]));
+          for (const s of norm) counts.set(s.platform || "Other", (counts.get(s.platform || "Other") || 0) + 1);
+          if ((counts.get(platform) || 0) === 0) {
+            const first = platforms.find((p) => (counts.get(p) || 0) > 0) || "Other";
+            setPlatform(first);
+          }
+        }
+
+        // auto-set price max based on data
         const rates = norm.map((x) => safeNum(x.rate, 0)).filter((x) => x > 0);
         const maxRate = rates.length ? Math.min(999, Math.max(...rates)) : 50;
         if (mounted) setPrice({ min: 0, max: Math.max(10, Math.ceil(maxRate)) });
@@ -659,6 +693,7 @@ export default function Services() {
       mounted = false;
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const categories = useMemo(() => {
@@ -697,7 +732,6 @@ export default function Services() {
     const minRate = rates.length ? Math.min(...rates) : 0;
     const maxRate = rates.length ? Math.max(...rates) : 0;
 
-    // top categories
     const catCount = new Map();
     for (const s of inPlatform) catCount.set(s.category, (catCount.get(s.category) || 0) + 1);
     const topCats = Array.from(catCount.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
@@ -715,7 +749,6 @@ export default function Services() {
   const pinned = useMemo(() => {
     if (!favs || favs.size === 0) return [];
     const arr = items.filter((x) => favs.has(x._id));
-    // keep pinned sorted by platform then rate
     arr.sort((a, b) => {
       if (a.platform !== b.platform) return a.platform.localeCompare(b.platform);
       return a.rate - b.rate;
@@ -731,7 +764,6 @@ export default function Services() {
       if (cat !== "all" && s.category !== cat) return false;
       if (onlyConnected && !s.externalServiceId) return false;
 
-      // price range
       const r = safeNum(s.rate, 0);
       if (r < price.min || r > price.max) return false;
 
@@ -740,13 +772,8 @@ export default function Services() {
       return hay.includes(qq);
     });
 
-    // 🔥 “Featured” = 2050 ranking
-    // - pinned first
-    // - connected first
-    // - shorter names / lower price slightly
-    // - if search is used: prioritize exact name hit
     if (sort === "featured") {
-      const qq = q.trim().toLowerCase();
+      const qq2 = q.trim().toLowerCase();
       out.sort((a, b) => {
         const ap = favs.has(a._id) ? 1 : 0;
         const bp = favs.has(b._id) ? 1 : 0;
@@ -756,9 +783,9 @@ export default function Services() {
         const bc = b.externalServiceId ? 1 : 0;
         if (bc !== ac) return bc - ac;
 
-        if (qq) {
-          const aHit = a.name.toLowerCase().includes(qq) ? 1 : 0;
-          const bHit = b.name.toLowerCase().includes(qq) ? 1 : 0;
+        if (qq2) {
+          const aHit = a.name.toLowerCase().includes(qq2) ? 1 : 0;
+          const bHit = b.name.toLowerCase().includes(qq2) ? 1 : 0;
           if (bHit !== aHit) return bHit - aHit;
         }
 
@@ -774,7 +801,6 @@ export default function Services() {
     return out;
   }, [items, platform, q, cat, sort, onlyConnected, price, favs]);
 
-  // pagination
   const [page, setPage] = useState(1);
   const pageSize = view === "list" ? 12 : 18;
 
@@ -800,7 +826,6 @@ export default function Services() {
     setCat("all");
     setSort("featured");
     setOnlyConnected(false);
-    // keep price range as is, just reset to full span
     const max = Math.max(price.max, 10);
     setPrice({ min: 0, max });
   }
@@ -809,7 +834,6 @@ export default function Services() {
 
   return (
     <div className="space-y-4">
-      {/* Masonry CSS (2050) */}
       <style>{`
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
@@ -817,14 +841,12 @@ export default function Services() {
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
       `}</style>
 
-      {/* toast */}
       {toast ? (
         <div className="fixed right-6 top-6 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
           {toast}
         </div>
       ) : null}
 
-      {/* ================= HERO HEADER (2050) ================= */}
       <GlassCard className="p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -836,16 +858,13 @@ export default function Services() {
               <Badge tone="blue">
                 <Layers className="h-3.5 w-3.5" /> {platform}
               </Badge>
-              <Badge tone={stats.connected ? "emerald" : "red"}>
-                {stats.connectedPct}% connected
-              </Badge>
+              <Badge tone={stats.connected ? "emerald" : "red"}>{stats.connectedPct}% connected</Badge>
             </div>
 
             <div className="mt-2 text-sm text-zinc-200/70">
               Choose platform → filter → pin favorites → instant buy. This is the “million euro” panel feel.
             </div>
 
-            {/* stats strip */}
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="text-xs text-zinc-200/60">Services</div>
@@ -854,9 +873,7 @@ export default function Services() {
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="text-xs text-zinc-200/60">Connected</div>
-                <div className="mt-1 text-xl font-black text-white">
-                  {fmtInt(stats.connected)}
-                </div>
+                <div className="mt-1 text-xl font-black text-white">{fmtInt(stats.connected)}</div>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -901,7 +918,6 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ================= PLATFORMS ================= */}
       <GlassCard className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           {platforms.map((p) => {
@@ -922,9 +938,7 @@ export default function Services() {
                 title={`${total} services (${conn} connected)`}
               >
                 <span className="font-semibold">{p}</span>
-                <span className={cn("text-xs opacity-75", active ? "" : "text-zinc-300")}>
-                  {total}
-                </span>
+                <span className={cn("text-xs opacity-75", active ? "" : "text-zinc-300")}>{total}</span>
                 {conn ? (
                   <Badge tone="emerald" className="ml-1">
                     <BadgeCheck className="h-3.5 w-3.5" /> {conn}
@@ -936,12 +950,10 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ================= STICKY FILTER BAR (2050) ================= */}
       <div className="sticky top-0 z-10">
         <GlassCard className="p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
-              {/* search */}
               <div className="relative w-full xl:w-[380px]">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
                 <input
@@ -966,7 +978,6 @@ export default function Services() {
                   <SlidersHorizontal className="h-4 w-4" /> Control
                 </span>
 
-                {/* category */}
                 <select
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
                   value={cat}
@@ -979,7 +990,6 @@ export default function Services() {
                   ))}
                 </select>
 
-                {/* sort */}
                 <select
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
                   value={sort}
@@ -999,7 +1009,6 @@ export default function Services() {
                   </option>
                 </select>
 
-                {/* only connected */}
                 <button
                   onClick={() => setOnlyConnected((x) => !x)}
                   className={cn(
@@ -1014,7 +1023,6 @@ export default function Services() {
                   Connected
                 </button>
 
-                {/* price range */}
                 <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
                   <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                   <Range
@@ -1030,7 +1038,6 @@ export default function Services() {
                   />
                 </div>
 
-                {/* reset */}
                 <button
                   onClick={resetFilters}
                   className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
@@ -1060,7 +1067,6 @@ export default function Services() {
         </GlassCard>
       </div>
 
-      {/* ================= PINNED (FAVORITES) ================= */}
       {pinned.length ? (
         <GlassCard className="p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -1068,9 +1074,7 @@ export default function Services() {
               <Badge tone="amber">
                 <Flame className="h-3.5 w-3.5" /> Pinned services
               </Badge>
-              <div className="text-sm text-zinc-200/70">
-                Your “fast-buy” set (stored in browser).
-              </div>
+              <div className="text-sm text-zinc-200/70">Your “fast-buy” set (stored in browser).</div>
             </div>
             <button
               onClick={() => {
@@ -1105,7 +1109,6 @@ export default function Services() {
         </GlassCard>
       ) : null}
 
-      {/* ================= STATE ================= */}
       {loading ? (
         <div className={cn(view === "list" ? "space-y-3" : "masonry")}>
           {Array.from({ length: 12 }).map((_, i) => (
@@ -1131,7 +1134,6 @@ export default function Services() {
         </GlassCard>
       ) : (
         <>
-          {/* ================= LIST / MASONRY GRID ================= */}
           {view === "grid" ? (
             <div className="masonry">
               {paged.map((s) => (
@@ -1165,7 +1167,6 @@ export default function Services() {
             </div>
           )}
 
-          {/* ================= PAGINATION ================= */}
           <div className="flex items-center justify-between">
             <div className="text-xs text-zinc-200/60">
               Featured = pinned → connected → best price → clean naming. Pure SaaS.
