@@ -12,7 +12,7 @@ import servicesRoutes from "./routes/services.routes.js";
 import meRoutes from "./routes/me.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import ordersRoutes from "./routes/orders.routes.js";
-import ordersSyncRoutes from "./routes/orders.sync.routes.js";
+import ordersSyncRoutes from "./routes/orders.syncRoutes.js";
 import walletRoutes from "./routes/wallet.routes.js";
 
 // ================= PAYMENTS (USER) =================
@@ -80,14 +80,14 @@ export function createApp({ corsOrigins = [] } = {}) {
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
+
     next();
   });
 
   // =====================================================
   // CORS (TOKEN-ONLY)
   // - NO cookies => credentials MUST be false
-  // - MUST NOT use "*" if you ever set credentials true (we don't)
-  // - Vary: Origin for caches
+  // - MUST properly handle OPTIONS via app.options
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
@@ -96,15 +96,15 @@ export function createApp({ corsOrigins = [] } = {}) {
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
+  // Vary: Origin (CDN/cache correctness)
   app.use((req, res, next) => {
-    // allow caches/CDNs to vary response per Origin
     res.setHeader("Vary", "Origin");
     next();
   });
 
   const corsOptions = {
     origin(origin, cb) {
-      // server-to-server / curl has no origin -> allow
+      // curl/postman/no-origin -> allow
       if (!origin) return cb(null, true);
       if (origin === "null") return cb(new Error("CORS: null origin"));
 
@@ -115,19 +115,18 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // echo exact origin
-      return cb(null, origin);
+      // IMPORTANT: return true (cors will echo origin automatically) OR echo origin
+      return cb(null, true);
     },
 
-    // ✅ TOKEN-ONLY => NO COOKIES
-    credentials: false,
+    credentials: false, // ✅ TOKEN ONLY
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
       "X-Requested-With",
-      "x-request-id",
+      "X-Request-Id",
       "Accept",
       "Origin",
     ],
@@ -136,18 +135,14 @@ export function createApp({ corsOrigins = [] } = {}) {
     optionsSuccessStatus: 204,
   };
 
+  // ✅ Apply CORS
   app.use(cors(corsOptions));
 
-  // ✅ Preflight handler (bez app.options("*"...))
-  app.use((req, res, next) => {
-    if (req.method === "OPTIONS") return res.sendStatus(204);
-    next();
-  });
+  // ✅ Proper preflight handling (DO NOT manually short-circuit)
+  app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES
-  // (može ostati za refresh token, ali FE ga ne šalje jer je credentials:omit)
-  // Ako želiš 100% token-only, možeš i ovo izbaciti.
+  // COOKIES (OK to keep; frontend uses credentials:omit anyway)
   // =====================================================
   app.use(cookieParser());
 
