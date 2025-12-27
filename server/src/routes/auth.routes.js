@@ -19,23 +19,26 @@ const authLimiter = rateLimit({
 });
 
 /**
- * Cookie options (FIXED for Vercel <-> ngrok cross-site)
- * - sameSite must be "none"
- * - secure must be true (required by browsers for SameSite=None)
- * - path should be "/" (simpler) so refreshToken is available when needed
+ * Cookie options
+ * NOTE:
+ * - Cross-site cookie (Vercel -> ngrok) je često problem u praksi.
+ * - Ako želiš refresh preko cookie-a cross-site: sameSite "none" + secure true.
+ * - Ako želiš da IZBEGNEŠ CORS/cookie dramu: u client fetch stavi credentials:"omit"
+ *   i refresh endpoint koristi samo kad radiš same-site/proxy.
  */
 function cookieOpts() {
+  const isProd = (process.env.NODE_ENV || "").toLowerCase() === "production";
+
   return {
     httpOnly: true,
-    secure: true,
+    secure: true, // mora true za SameSite=None u modernim browserima
     sameSite: "none",
     path: "/",
-    // domain: do NOT set domain here for ngrok/vercel; let browser scope it naturally
+    // domain: NE postavljati za ngrok/vercel
   };
 }
 
-// ===================== REGISTER =====================
-// NOTE: register returns ok, but does NOT auto-login (you can add it later).
+/* ===================== REGISTER ===================== */
 router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
@@ -70,7 +73,7 @@ router.post("/register", authLimiter, async (req, res, next) => {
   }
 });
 
-// ===================== LOGIN =====================
+/* ===================== LOGIN ===================== */
 router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
@@ -88,6 +91,7 @@ router.post("/login", authLimiter, async (req, res, next) => {
       role: user.role,
     });
 
+    // refresh token (optional)
     const refreshToken = signRefreshToken({ id: user._id.toString() });
 
     await RefreshSession.create({
@@ -98,7 +102,7 @@ router.post("/login", authLimiter, async (req, res, next) => {
       ip: req.ip || "",
     });
 
-    // ✅ FIXED COOKIE
+    // ✅ set cookie
     res.cookie("refreshToken", refreshToken, cookieOpts());
 
     return res.json({
@@ -110,25 +114,13 @@ router.post("/login", authLimiter, async (req, res, next) => {
   }
 });
 
-// ===================== ME =====================
-// GET /auth/me
-router.get("/me", requireAuth, async (req, res, next) => {
-  try {
-    const user = await User.findById(req.user.id).select("_id email role balance");
-    if (!user) return res.status(404).json({ message: "User not found" });
-
-    return res.json({
-      id: user._id,
-      email: user.email,
-      role: user.role,
-      balance: user.balance,
-    });
-  } catch (e) {
-    next(e);
-  }
-});
-
-// ===================== REFRESH =====================
+/* ===================== REFRESH ===================== */
+/**
+ * POST /auth/refresh
+ * NOTE: Ovo koristi cookie refreshToken.
+ * Ako ti frontend radi credentials:"omit" (token-only), browser NEĆE slati cookie,
+ * pa refresh neće raditi cross-site — što je OK dok ne uvedemo proxy / same-site.
+ */
 router.post("/refresh", async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
   if (!refreshToken) return res.status(401).json({ message: "No refresh token" });
@@ -159,7 +151,6 @@ router.post("/refresh", async (req, res) => {
       ip: req.ip || "",
     });
 
-    // ✅ FIXED COOKIE
     res.cookie("refreshToken", newRefresh, cookieOpts());
 
     const user = await User.findById(payload.id).select("_id email role");
@@ -177,7 +168,7 @@ router.post("/refresh", async (req, res) => {
   }
 });
 
-// ===================== LOGOUT =====================
+/* ===================== LOGOUT ===================== */
 router.post("/logout", requireAuth, async (req, res, next) => {
   try {
     const refreshToken = req.cookies?.refreshToken;
@@ -189,18 +180,15 @@ router.post("/logout", requireAuth, async (req, res, next) => {
       );
     }
 
-    // ✅ clear cookie WITH SAME OPTIONS (path/samesite/secure must match)
     res.clearCookie("refreshToken", cookieOpts());
-
     return res.json({ ok: true });
   } catch (e) {
     next(e);
   }
 });
 
-// ===================== GOOGLE (COMING SOON) =====================
+/* ===================== GOOGLE (PLACEHOLDER) ===================== */
 router.get("/google", (req, res) => {
-  // (ostaje isto kao kod tebe)
   res
     .status(200)
     .set("Content-Type", "text/html")
