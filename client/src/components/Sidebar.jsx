@@ -326,7 +326,7 @@ export default function Sidebar({ mobile = false, onClose }) {
       setLoading(true);
       try {
         // ✅ your backend supports /auth/me (you tested 200)
-        const data = await api.get("/auth/me");
+        const data = await api.get("/api/me");
         if (!alive) return;
         setMe(data);
         localStorage.setItem("role", data?.role || "");

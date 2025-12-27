@@ -85,7 +85,7 @@ export default function Topbar() {
     let alive = true;
     (async () => {
       try {
-        const data = await api.get("/auth/me");
+        const data = await api.get("/api/me");
         if (!alive) return;
         setMe(data || null);
       } catch {
