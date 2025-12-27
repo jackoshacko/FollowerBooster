@@ -1,0 +1,35 @@
+{
+  "name": "smm-panel-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon src/index.js",
+    "start": "node src/index.js",
+
+    "seed:services": "node src/seed/runSeedServices.js",
+    "seed:all": "node src/seed/runSeedServices.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^7.2.0",
+    "hpp": "^0.2.3",
+    "jsonwebtoken": "^9.0.3",
+    "mongo-sanitize": "^1.1.0",
+    "mongoose": "^8.8.4",
+    "node-fetch": "^3.3.2",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "xss": "^1.0.15",
+    "zod": "^4.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.7"
+  }
+}
