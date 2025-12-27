@@ -24,7 +24,8 @@ import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import AdminOrders from "./pages/admin/AdminOrders.jsx";
 import AdminUsers from "./pages/admin/AdminUsers.jsx";
 import AdminTransactions from "./pages/admin/AdminTransactions.jsx";
-import PayPalAdmin from "./pages/admin/PayPalAdmin.jsx";
+// ⛔ PayPalAdmin privremeno isključen (ne postoji fajl / case issue)
+// import PayPalAdmin from "./pages/admin/PayPalAdmin.jsx";
 
 function AdminGuard() {
   return (
@@ -37,12 +38,12 @@ function AdminGuard() {
 export default function App() {
   return (
     <Routes>
-      {/* PUBLIC */}
+      {/* ================= PUBLIC ================= */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/no-access" element={<NoAccess />} />
 
-      {/* PROTECTED APP */}
+      {/* ================= PROTECTED APP ================= */}
       <Route
         element={
           <RequireAuth>
@@ -60,7 +61,7 @@ export default function App() {
         <Route path="orders" element={<Orders />} />
         <Route path="wallet" element={<Wallet />} />
 
-        {/* ADMIN (only /admin/*) */}
+        {/* ================= ADMIN ================= */}
         <Route path="admin" element={<AdminGuard />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
@@ -68,13 +69,14 @@ export default function App() {
           <Route path="orders" element={<AdminOrders />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="transactions" element={<AdminTransactions />} />
-          <Route path="paypal" element={<PayPalAdmin />} />
+
+          {/* PayPal admin privremeno isključen */}
+          {/* <Route path="paypal" element={<PayPalAdmin />} /> */}
         </Route>
       </Route>
 
-      {/* fallback */}
+      {/* ================= FALLBACK ================= */}
       <Route path="*" element={<div className="p-6">404</div>} />
     </Routes>
   );
 }
-
