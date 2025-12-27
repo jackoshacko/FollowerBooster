@@ -59,10 +59,21 @@ export default function Topbar() {
   const [q, setQ] = useState("");
   const [focusSearch, setFocusSearch] = useState(false);
 
-  function logout() {
+  function hardLogout({ redirect = true } = {}) {
     setToken("");
     setUser(null);
-    nav("/login");
+    localStorage.removeItem("role");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
+    // notify app listeners (RequireAuth, etc.)
+    window.dispatchEvent(new Event("auth-changed"));
+
+    if (redirect) nav("/login", { replace: true });
+  }
+
+  function logout() {
+    hardLogout({ redirect: true });
   }
 
   // close drawer on route change
@@ -80,21 +91,60 @@ export default function Topbar() {
     };
   }, [open]);
 
-  // load ME once (Topbar uses it for chip; Sidebar also fetches, but this is light)
+  // ✅ load ME once (token-only)
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("no token");
+
+        // IMPORTANT: token-only endpoint (NOT /auth/me)
+        const data = await api.get("/api/me");
+
+        if (!alive) return;
+        setMe(data || null);
+
+        if (data?.role) localStorage.setItem("role", data.role);
+      } catch (e) {
+        if (!alive) return;
+        setMe(null);
+        // if session check fails on a protected page -> kick out
+        if (loc.pathname !== "/login" && loc.pathname !== "/register") {
+          hardLogout({ redirect: true });
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // also refresh "me" when auth changes (login/logout from anywhere)
+  useEffect(() => {
+    let alive = true;
+
+    const onAuthChanged = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("no token");
         const data = await api.get("/api/me");
         if (!alive) return;
         setMe(data || null);
+        if (data?.role) localStorage.setItem("role", data.role);
       } catch {
         if (!alive) return;
         setMe(null);
       }
-    })();
+    };
+
+    window.addEventListener("auth-changed", onAuthChanged);
     return () => {
       alive = false;
+      window.removeEventListener("auth-changed", onAuthChanged);
     };
   }, []);
 
@@ -114,7 +164,7 @@ export default function Topbar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // focus handling (tiny trick so we can focus after render)
+  // focus handling
   useEffect(() => {
     if (!focusSearch) return;
     const el = document.getElementById("topbar-search");
@@ -128,13 +178,11 @@ export default function Topbar() {
 
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
-  // simple client-side "command palette" behavior: route jump by typing
   function onSubmitSearch(e) {
     e.preventDefault();
     const s = q.trim().toLowerCase();
     if (!s) return;
 
-    // quick routing
     if (s.startsWith("wal")) return nav("/wallet");
     if (s.startsWith("ord")) return nav("/orders");
     if (s.startsWith("ser")) return nav("/services");
@@ -146,29 +194,24 @@ export default function Topbar() {
   return (
     <>
       <header className="sticky top-0 z-30">
-        {/* GLASS BAR */}
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
-          {/* subtle highlight lines */}
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
 
           <div
             className={cn(
               "relative flex h-16 items-center justify-between px-4 md:px-6",
-              // iOS safe-area
               "pt-[env(safe-area-inset-top)]"
             )}
           >
-            {/* ambient glow */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
               <div className="glow-orb absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
               <div className="glow-orb2 absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
               <div className="absolute inset-0 bg-[radial-gradient(900px_120px_at_20%_0%,rgba(255,255,255,0.10),transparent_65%)]" />
             </div>
 
-            {/* LEFT: burger + brand + route */}
+            {/* LEFT */}
             <div className="relative z-10 flex items-center gap-3 min-w-0">
-              {/* MOBILE BURGER */}
               <button
                 onClick={() => setOpen(true)}
                 className={cn(
@@ -181,7 +224,6 @@ export default function Topbar() {
                 <Menu className="h-5 w-5" />
               </button>
 
-              {/* Brand */}
               <button
                 onClick={() => nav("/dashboard")}
                 className="flex items-center gap-3 min-w-0"
@@ -201,10 +243,8 @@ export default function Topbar() {
                 </div>
               </button>
 
-              {/* Divider */}
               <div className="hidden sm:block h-9 w-px bg-white/10 shrink-0" />
 
-              {/* Route badge */}
               <div className="hidden sm:flex items-center gap-2 shrink-0">
                 <span
                   className={cn(
@@ -230,7 +270,7 @@ export default function Topbar() {
               </div>
             </div>
 
-            {/* CENTER: search (desktop only) */}
+            {/* CENTER */}
             <div className="relative z-10 hidden lg:block w-[520px] max-w-[38vw]">
               <form onSubmit={onSubmitSearch} className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
@@ -256,9 +296,8 @@ export default function Topbar() {
               </form>
             </div>
 
-            {/* RIGHT: quick actions + user chip + logout */}
+            {/* RIGHT */}
             <div className="relative z-10 flex items-center gap-2 md:gap-3 shrink-0">
-              {/* quick actions (desktop) */}
               <div className="hidden md:flex items-center gap-2">
                 <button
                   onClick={() => nav("/wallet")}
@@ -289,7 +328,6 @@ export default function Topbar() {
                 </button>
               </div>
 
-              {/* User chip */}
               <div
                 className={cn(
                   "flex items-center gap-2 rounded-2xl border border-white/10",
@@ -310,7 +348,6 @@ export default function Topbar() {
                 </div>
               </div>
 
-              {/* Logout */}
               <button
                 onClick={logout}
                 className={cn(
@@ -332,15 +369,9 @@ export default function Topbar() {
       {/* MOBILE DRAWER */}
       {open ? (
         <div className="fixed inset-0 z-40 md:hidden">
-          {/* overlay */}
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
-            onClick={() => setOpen(false)}
-          />
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
 
-          {/* panel */}
           <div className="absolute left-0 top-0 h-full w-[88%] max-w-[380px]">
-            {/* close btn */}
             <div className="absolute right-3 top-3 z-50">
               <button
                 onClick={() => setOpen(false)}
@@ -355,7 +386,6 @@ export default function Topbar() {
               </button>
             </div>
 
-            {/* sidebar */}
             <Sidebar mobile onClose={() => setOpen(false)} />
           </div>
         </div>
@@ -363,3 +393,4 @@ export default function Topbar() {
     </>
   );
 }
+

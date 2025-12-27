@@ -22,7 +22,6 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 
-// ✅ CANONICAL API ONLY
 import { api, setToken, setUser } from "../lib/api.js";
 
 function cls(...xs) {
@@ -193,21 +192,18 @@ function SidebarShell({
     <aside
       className={cls(
         "relative p-4",
-        // ✅ mobile uses 100dvh to avoid browser bars issues; desktop uses full height
         mobile ? "h-[100dvh]" : "h-screen",
         "border-r border-white/10 bg-black/35 backdrop-blur-xl",
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         collapsed ? "w-[98px]" : "w-[310px]"
       )}
     >
-      {/* Ambient glow */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
         <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
       </div>
 
-      {/* header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0 backdrop-blur-xl">
@@ -219,7 +215,9 @@ function SidebarShell({
               <div className="text-sm font-extrabold tracking-tight text-white truncate">
                 {title || "FollowerBooster"}
               </div>
-              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
+              <div className="text-xs text-zinc-200/60 truncate">
+                {loading ? "Loading…" : subtitle || "Authenticated"}
+              </div>
             </div>
           ) : null}
         </div>
@@ -245,8 +243,7 @@ function SidebarShell({
             className={cls(
               "inline-flex items-center justify-center rounded-2xl p-2",
               "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
-              "hover:bg-white/10 hover:text-white transition",
-              "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_16px_55px_rgba(168,85,247,0.18)]"
+              "hover:bg-white/10 hover:text-white transition"
             )}
             title="Logout"
           >
@@ -259,7 +256,6 @@ function SidebarShell({
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-      {/* ✅ scroll area: prevents “squeezing” on small heights */}
       <div className="mt-3 flex flex-col min-h-0">
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
@@ -319,20 +315,24 @@ export default function Sidebar({ mobile = false, onClose }) {
     if (mobile && typeof onClose === "function") onClose();
   };
 
-  // load ME once
+  // ✅ Load /api/me (token-only)
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       try {
-        // ✅ your backend supports /auth/me (you tested 200)
+        const token = localStorage.getItem("token");
+        if (!token) throw new Error("no token");
+
         const data = await api.get("/api/me");
         if (!alive) return;
+
         setMe(data);
         localStorage.setItem("role", data?.role || "");
       } catch {
         if (!alive) return;
         setMe(null);
+        hardLogout();
       } finally {
         if (!alive) return;
         setLoading(false);
@@ -341,6 +341,7 @@ export default function Sidebar({ mobile = false, onClose }) {
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadSidebarMetrics({ silent = false } = {}) {
@@ -642,7 +643,6 @@ export default function Sidebar({ mobile = false, onClose }) {
     </>
   );
 
-  // ✅ Desktop: only visible md+
   if (!mobile) {
     return (
       <div className="sticky top-0 hidden md:block">
@@ -663,7 +663,6 @@ export default function Sidebar({ mobile = false, onClose }) {
     );
   }
 
-  // ✅ Mobile: always expanded in drawer
   return (
     <SidebarShell
       mobile
@@ -680,3 +679,4 @@ export default function Sidebar({ mobile = false, onClose }) {
     </SidebarShell>
   );
 }
+
