@@ -18,16 +18,24 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Cookie options (FIXED for Vercel <-> ngrok cross-site)
+ * - sameSite must be "none"
+ * - secure must be true (required by browsers for SameSite=None)
+ * - path should be "/" (simpler) so refreshToken is available when needed
+ */
 function cookieOpts() {
   return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/auth/refresh",
+    secure: true,
+    sameSite: "none",
+    path: "/",
+    // domain: do NOT set domain here for ngrok/vercel; let browser scope it naturally
   };
 }
 
 // ===================== REGISTER =====================
+// NOTE: register returns ok, but does NOT auto-login (you can add it later).
 router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
@@ -90,6 +98,7 @@ router.post("/login", authLimiter, async (req, res, next) => {
       ip: req.ip || "",
     });
 
+    // ✅ FIXED COOKIE
     res.cookie("refreshToken", refreshToken, cookieOpts());
 
     return res.json({
@@ -101,7 +110,7 @@ router.post("/login", authLimiter, async (req, res, next) => {
   }
 });
 
-// ===================== ME (✅ bitno za Sidebar/admin) =====================
+// ===================== ME =====================
 // GET /auth/me
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
@@ -150,6 +159,7 @@ router.post("/refresh", async (req, res) => {
       ip: req.ip || "",
     });
 
+    // ✅ FIXED COOKIE
     res.cookie("refreshToken", newRefresh, cookieOpts());
 
     const user = await User.findById(payload.id).select("_id email role");
@@ -179,7 +189,9 @@ router.post("/logout", requireAuth, async (req, res, next) => {
       );
     }
 
-    res.clearCookie("refreshToken", { path: "/auth/refresh" });
+    // ✅ clear cookie WITH SAME OPTIONS (path/samesite/secure must match)
+    res.clearCookie("refreshToken", cookieOpts());
+
     return res.json({ ok: true });
   } catch (e) {
     next(e);
@@ -188,174 +200,11 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 
 // ===================== GOOGLE (COMING SOON) =====================
 router.get("/google", (req, res) => {
+  // (ostaje isto kao kod tebe)
   res
     .status(200)
     .set("Content-Type", "text/html")
-    .send(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FollowerBooster • Coming Soon</title>
-
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Orbitron:wght@500;600;700&display=swap" rel="stylesheet" />
-
-  <style>
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; }
-    body {
-      font-family: Inter, system-ui, Arial, sans-serif;
-      background: radial-gradient(1200px 700px at 50% 40%, rgba(0,212,255,.14), rgba(0,0,0,0) 55%),
-                  linear-gradient(180deg, #0b0b0b, #050505);
-      color: #fff;
-      display: grid;
-      place-items: center;
-      padding: 18px;
-    }
-    .card {
-      width: 100%;
-      max-width: 560px;
-      border-radius: 18px;
-      background: rgba(15,15,15,0.75);
-      border: 1px solid rgba(255,255,255,0.08);
-      backdrop-filter: blur(18px);
-      box-shadow: 0 30px 80px rgba(0,0,0,.8);
-      padding: 28px;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-    .glow {
-      position: absolute;
-      inset: -120px;
-      background: radial-gradient(circle at 50% 35%, rgba(0,212,255,.18), rgba(106,92,255,.12), rgba(0,0,0,0) 55%);
-      filter: blur(22px);
-      pointer-events: none;
-    }
-    .brand {
-      font-family: Orbitron, Inter, sans-serif;
-      font-weight: 700;
-      letter-spacing: 1.5px;
-      font-size: 26px;
-      margin-bottom: 8px;
-      position: relative;
-    }
-    .title {
-      font-size: 18px;
-      font-weight: 800;
-      margin: 0 0 8px;
-      position: relative;
-    }
-    .sub {
-      opacity: .72;
-      margin: 0 0 18px;
-      position: relative;
-      line-height: 1.5;
-      font-size: 14px;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.10);
-      font-weight: 700;
-      position: relative;
-    }
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #00d4ff;
-      box-shadow: 0 0 18px rgba(0,212,255,.55);
-      animation: pulse 1.4s infinite ease-in-out;
-    }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.35); opacity: .75; }
-      100% { transform: scale(1); opacity: 1; }
-    }
-    .btnRow {
-      margin-top: 18px;
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-      position: relative;
-    }
-    a.btn {
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 12px 14px;
-      border-radius: 12px;
-      font-weight: 900;
-      transition: all .25s ease;
-      min-width: 180px;
-    }
-    a.primary {
-      background: linear-gradient(135deg, #6a5cff, #00d4ff);
-      color: #000;
-    }
-    a.primary:hover {
-      box-shadow: 0 0 25px rgba(0,212,255,.55);
-      transform: translateY(-1px);
-    }
-    a.ghost {
-      background: rgba(255,255,255,.06);
-      border: 1px solid rgba(255,255,255,.12);
-      color: #fff;
-    }
-    a.ghost:hover {
-      box-shadow: 0 0 18px rgba(255,255,255,.16);
-      transform: translateY(-1px);
-    }
-    .small {
-      margin-top: 14px;
-      opacity: .55;
-      font-size: 12px;
-      position: relative;
-    }
-    code {
-      background: rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.10);
-      padding: 3px 8px;
-      border-radius: 10px;
-      color: rgba(255,255,255,.85);
-    }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="glow"></div>
-    <div class="brand">FollowerBooster</div>
-    <h1 class="title">Google Sign-in is coming soon</h1>
-    <p class="sub">
-      We’re polishing the OAuth flow and security hardening.<br />
-      For now, please use email & password login.
-    </p>
-
-    <div class="pill">
-      <span class="dot"></span>
-      Coming Soon • OAuth
-    </div>
-
-    <div class="btnRow">
-      <a class="btn primary" href="http://localhost:5173/login">Back to Login</a>
-      <a class="btn ghost" href="http://localhost:5173/register">Create Account</a>
-    </div>
-
-    <div class="small">
-      Endpoint: <code>GET /auth/google</code>
-    </div>
-  </div>
-</body>
-</html>`);
+    .send(`<!doctype html><html><body>Coming soon</body></html>`);
 });
 
 export default router;

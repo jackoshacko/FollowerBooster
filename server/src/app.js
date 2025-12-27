@@ -35,9 +35,28 @@ import { notFound } from "./middlewares/notFound.js";
 function safeStr(x) {
   return String(x || "").trim();
 }
-
 function makeRequestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function isAllowedByPattern(origin) {
+  try {
+    const u = new URL(origin);
+    const host = u.hostname;
+
+    // allow localhost dev
+    if (host === "localhost" || host === "127.0.0.1") return true;
+
+    // allow vercel (prod + preview)
+    if (host.endsWith(".vercel.app")) return true;
+
+    // allow ngrok
+    if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export function createApp({ corsOrigins = [] } = {}) {
@@ -46,11 +65,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   // TRUST PROXY (ngrok / reverse proxies)
   // =====================================================
-  // If you run behind ngrok / cloudflare / reverse proxy, this is needed
   app.set("trust proxy", 1);
 
   // =====================================================
-  // REQUEST ID + BASIC SECURITY HEADERS (no extra deps)
+  // REQUEST ID + BASIC SECURITY HEADERS
   // =====================================================
   app.use((req, res, next) => {
     const reqId =
@@ -61,37 +79,53 @@ export function createApp({ corsOrigins = [] } = {}) {
     req.reqId = reqId;
     res.setHeader("x-request-id", reqId);
 
-    // minimal hardening headers (keep it light)
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
-    // keep CSP off unless you serve frontend from backend
     next();
   });
 
   // =====================================================
-  // CORS (whitelist if provided)
+  // CORS (HARD FIX)
   // =====================================================
-  const useWhitelist = Array.isArray(corsOrigins) && corsOrigins.length > 0;
+  const whitelist = Array.isArray(corsOrigins)
+    ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
+    : [];
 
-  app.use(
-    cors({
-      origin: useWhitelist
-        ? (origin, cb) => {
-            // allow non-browser clients (no origin)
-            if (!origin) return cb(null, true);
-            if (corsOrigins.includes(origin)) return cb(null, true);
-            return cb(new Error("Not allowed by CORS: " + origin));
-          }
-        : true,
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-request-id"],
-    })
-  );
+  const corsOptions = {
+    origin(origin, cb) {
+      // ✅ IMPORTANT:
+      // Ako nema Origin header (server-to-server), NE dodaj CORS headere
+      // (da ne završi kao "*", pa credentials pukne).
+      if (!origin) return cb(null, false);
 
-  // handle preflight quickly
-  app.options("*", cors());
+      // nekad dođe "null" origin (sandbox / file://)
+      if (origin === "null") return cb(null, true);
+
+      if (whitelist.includes(origin)) return cb(null, true);
+      if (isAllowedByPattern(origin)) return cb(null, true);
+
+      console.error("❌ CORS blocked:", origin);
+      return cb(new Error("Not allowed by CORS: " + origin));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-request-id",
+      "Accept",
+      "Origin",
+    ],
+    exposedHeaders: ["x-request-id"],
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
+  };
+
+  app.use(cors(corsOptions));
+  // ✅ preflight mora koristiti ISTE opcije (ne cors() bez args)
+  app.options("*", cors(corsOptions));
 
   // =====================================================
   // COOKIES
@@ -101,11 +135,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
   // =====================================================
-  // IMPORTANT: this route uses express.raw() inside
   app.use("/webhooks", paypalWebhooksRoutes);
 
   // =====================================================
-  // BODY PARSERS (for everything else)
+  // BODY PARSERS
   // =====================================================
   app.use(express.json({ limit: "200kb" }));
   app.use(express.urlencoded({ extended: true, limit: "200kb" }));
@@ -124,7 +157,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // HEALTH (fast)
+  // HEALTH
   // =====================================================
   app.use("/health", healthRoutes);
 
@@ -137,7 +170,6 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   // USER ROUTES
   // =====================================================
-  // keep as you have: /api/me and /api/dashboard
   app.use("/api", meRoutes);
   app.use("/api", dashboardRoutes);
 
@@ -156,11 +188,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use("/admin", adminRoutes);
   app.use("/admin/services", adminServicesRoutes);
   app.use("/admin/balance", adminBalanceRoutes);
-
-  // ✅ provider routes
   app.use("/admin/provider", adminProviderRoutes);
-
-  // ✅ admin paypal
   app.use("/admin/payments/paypal", adminPaypalPaymentsRoutes);
 
   // =====================================================
@@ -169,11 +197,9 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use(notFound);
 
   // =====================================================
-  // GLOBAL ERROR HANDLER (safe + consistent)
+  // GLOBAL ERROR HANDLER
   // =====================================================
   app.use((err, req, res, next) => {
-    // PayPal webhooks are already handled inside their route and always return 200,
-    // but just in case, don't crash:
     const status = err?.status || err?.statusCode || 500;
 
     console.error("🔥 BACKEND ERROR");
@@ -182,7 +208,6 @@ export function createApp({ corsOrigins = [] } = {}) {
     console.error("URL:", req.originalUrl);
     console.error(err?.stack || err);
 
-    // Avoid leaking internals in production
     const isProd = (process.env.NODE_ENV || "").toLowerCase() === "production";
 
     return res.status(status).json({
@@ -196,5 +221,6 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   return app;
 }
+
 
 

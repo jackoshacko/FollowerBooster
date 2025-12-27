@@ -23,38 +23,11 @@ export function getUser() {
   }
 }
 
-let refreshing = null;
-
-async function refreshAccessToken() {
-  if (refreshing) return refreshing;
-
-  refreshing = (async () => {
-    const res = await fetch(`${API}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.message || "Refresh failed");
-
-    if (data?.accessToken) setToken(data.accessToken);
-    return data?.accessToken;
-  })();
-
-  try {
-    return await refreshing;
-  } finally {
-    refreshing = null;
-  }
-}
-
-async function request(path, options = {}, retry = true) {
+async function request(path, options = {}) {
   const token = getToken();
 
   const res = await fetch(`${API}${path}`, {
     ...options,
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -64,16 +37,13 @@ async function request(path, options = {}, retry = true) {
 
   const data = await res.json().catch(() => ({}));
 
-  if (res.status === 401 && retry) {
-    try {
-      await refreshAccessToken();
-      return request(path, options, false);
-    } catch (e) {
-      setToken("");
-      setUser(null);
-      if (window.location.pathname !== "/login") window.location.href = "/login";
-      throw e;
-    }
+  if (res.status === 401) {
+    // token invalid/expired → logout
+    setToken("");
+    setUser(null);
+    localStorage.removeItem("role");
+    if (window.location.pathname !== "/login") window.location.href = "/login";
+    throw new Error("Unauthorized");
   }
 
   if (!res.ok) throw new Error(data?.message || "Request failed");

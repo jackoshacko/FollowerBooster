@@ -15,7 +15,7 @@ export default function RequireAuth({ children }) {
     }
 
     try {
-      await api.get("/auth/me");
+      await api.get("/api/me"); // ✅ token-only endpoint
       setOk(true);
     } catch {
       localStorage.removeItem("token");
@@ -36,11 +36,9 @@ export default function RequireAuth({ children }) {
 
     run();
 
-    // 🔥 kad god se login/logout desi
     const onAuth = () => run();
     window.addEventListener("auth-changed", onAuth);
 
-    // (bonus) ako se token promeni u drugom tabu
     const onStorage = (e) => {
       if (e.key === "token") run();
     };
