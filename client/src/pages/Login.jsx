@@ -1,7 +1,7 @@
 // client/src/pages/Login.jsx
 import React, { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { api, setToken, apiUrl } from "../lib/api.js";
+import { api, setToken, apiUrl, clearAuthLocal } from "../lib/api.js";
 
 import bg from "../assets/bg.jpg";
 
@@ -20,10 +20,12 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // login
-      const data = await api.post("/auth/login", { email, password });
+      // ✅ koristi dedicated api.login (garantuje da ide kroz lib/api request wrapper)
+      const data = await api.login({
+        email: email.trim(),
+        password,
+      });
 
-      // token
       const accessToken = data?.accessToken || data?.token;
       if (!accessToken) throw new Error("Login response missing accessToken");
 
@@ -36,7 +38,7 @@ export default function Login() {
 
       // ako login ne vraća user/role → povuci /api/me (token-only)
       if (!role || !user) {
-        const me = await api.get("/api/me");
+        const me = await api.me(); // ✅ koristi helper
         user = me || user;
         role = me?.role || role || "user";
       }
@@ -44,7 +46,6 @@ export default function Login() {
       if (user) localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("role", role || "user");
 
-      // redirect
       const fromPath = loc.state?.from?.pathname || "/dashboard";
       const isAdminRoute = String(fromPath).startsWith("/admin");
 
@@ -56,20 +57,18 @@ export default function Login() {
       nav(fromPath === "/" ? "/dashboard" : fromPath, { replace: true });
     } catch (e2) {
       setErr(e2?.message || "Login failed");
-      localStorage.removeItem("token");
-      localStorage.removeItem("role");
-      localStorage.removeItem("user");
+      clearAuthLocal(); // ✅ central cleanup
     } finally {
       setLoading(false);
     }
   }
 
   function googleLogin() {
-    // ✅ koristi isti backend base kao i ostatak app-a (ngrok/prod)
+    // redirect flow (ne XHR) — OK
     window.location.href = apiUrl("/auth/google");
   }
 
-  // UI helpers (micro-interactions)
+  // UI helpers
   function focusOn(e) {
     e.currentTarget.style.border = "1px solid #00d4ff";
     e.currentTarget.style.boxShadow = "0 0 12px rgba(0,212,255,0.35)";
@@ -104,6 +103,7 @@ export default function Login() {
         {err && <div style={styles.error}>{err}</div>}
 
         <button
+          type="button"
           onClick={googleLogin}
           style={styles.googleBtn}
           onMouseEnter={(e) => {
@@ -150,6 +150,7 @@ export default function Login() {
           />
 
           <button
+            type="submit"
             style={{
               ...styles.loginBtn,
               background: loginBg,
@@ -182,13 +183,11 @@ const styles = {
     fontFamily: "Inter, sans-serif",
     position: "relative",
   },
-
   overlay: {
     position: "absolute",
     inset: 0,
     background: "linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.85))",
   },
-
   card: {
     position: "relative",
     width: "100%",
@@ -202,7 +201,6 @@ const styles = {
     color: "#fff",
     zIndex: 1,
   },
-
   brand: {
     fontFamily: "Orbitron, sans-serif",
     fontSize: 26,
@@ -210,14 +208,12 @@ const styles = {
     letterSpacing: 1.5,
     textAlign: "center",
   },
-
   subtitle: {
     textAlign: "center",
     fontSize: 13,
     opacity: 0.7,
     marginBottom: 22,
   },
-
   error: {
     background: "rgba(255,50,50,.15)",
     border: "1px solid rgba(255,50,50,.3)",
@@ -226,7 +222,6 @@ const styles = {
     fontSize: 13,
     marginBottom: 12,
   },
-
   googleBtn: {
     width: "100%",
     padding: "12px",
@@ -238,7 +233,6 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.25s ease",
   },
-
   divider: {
     display: "flex",
     alignItems: "center",
@@ -247,18 +241,15 @@ const styles = {
     opacity: 0.5,
     fontSize: 12,
   },
-
   divLine: {
     height: 1,
     background: "rgba(255,255,255,.18)",
     flex: 1,
   },
-
   form: {
     display: "grid",
     gap: 12,
   },
-
   input: {
     padding: "12px 14px",
     borderRadius: 12,
@@ -269,7 +260,6 @@ const styles = {
     fontSize: 14,
     transition: "all 0.25s ease",
   },
-
   loginBtn: {
     marginTop: 6,
     padding: "12px",
@@ -281,7 +271,6 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.25s ease",
   },
-
   footer: {
     marginTop: 16,
     textAlign: "center",
@@ -289,4 +278,3 @@ const styles = {
     opacity: 0.8,
   },
 };
-

@@ -19,12 +19,12 @@ export default function Register() {
     setLoading(true);
 
     try {
-      await api.post("/auth/register", {
+      // ✅ koristi dedicated api.register
+      await api.register({
         email: email.trim(),
         password,
       });
 
-      // backend register ne vraća token -> idi na login
       nav("/login", { replace: true });
     } catch (e) {
       setErr(e?.message || "Register failed");
@@ -34,7 +34,6 @@ export default function Register() {
   }
 
   function googleLogin() {
-    // ✅ koristi isti backend base kao app (ngrok/prod), ne localhost
     window.location.href = apiUrl("/auth/google");
   }
 
@@ -126,6 +125,7 @@ export default function Register() {
           </div>
 
           <button
+            type="submit"
             style={{
               ...styles.primaryBtn,
               background: primaryBg,
@@ -162,13 +162,11 @@ const styles = {
     fontFamily: "Inter, sans-serif",
     position: "relative",
   },
-
   overlay: {
     position: "absolute",
     inset: 0,
     background: "linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.88))",
   },
-
   card: {
     position: "relative",
     width: "100%",
@@ -182,7 +180,6 @@ const styles = {
     color: "#fff",
     zIndex: 1,
   },
-
   brand: {
     fontFamily: "Orbitron, sans-serif",
     fontSize: 26,
@@ -190,7 +187,6 @@ const styles = {
     letterSpacing: 1.5,
     textAlign: "center",
   },
-
   subtitle: {
     textAlign: "center",
     fontSize: 13,
@@ -198,7 +194,6 @@ const styles = {
     marginTop: 6,
     marginBottom: 18,
   },
-
   error: {
     background: "rgba(255,50,50,.15)",
     border: "1px solid rgba(255,50,50,.3)",
@@ -207,7 +202,6 @@ const styles = {
     fontSize: 13,
     marginBottom: 12,
   },
-
   googleBtn: {
     width: "100%",
     padding: "12px",
@@ -219,7 +213,6 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.25s ease",
   },
-
   divider: {
     display: "flex",
     alignItems: "center",
@@ -228,28 +221,23 @@ const styles = {
     opacity: 0.5,
     fontSize: 12,
   },
-
   divLine: {
     height: 1,
     background: "rgba(255,255,255,.18)",
     flex: 1,
   },
-
   form: {
     display: "grid",
     gap: 12,
   },
-
   field: {
     display: "grid",
     gap: 6,
   },
-
   label: {
     fontSize: 12,
     opacity: 0.75,
   },
-
   input: {
     padding: "12px 14px",
     borderRadius: 12,
@@ -260,7 +248,6 @@ const styles = {
     fontSize: 14,
     transition: "all 0.25s ease",
   },
-
   primaryBtn: {
     marginTop: 6,
     padding: "12px",
@@ -272,14 +259,12 @@ const styles = {
     cursor: "pointer",
     transition: "all 0.25s ease",
   },
-
   footer: {
     marginTop: 14,
     textAlign: "center",
     fontSize: 13,
     opacity: 0.85,
   },
-
   micro: {
     marginTop: 10,
     textAlign: "center",
