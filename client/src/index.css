@@ -16,6 +16,54 @@ body,
     "Apple Color Emoji", "Segoe UI Emoji";
 }
 
+/* ✅ iOS / mobile stability (NO sideways drift + stable scroll) */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;            /* stop horizontal drift */
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-x: none;   /* stop sideways rubber band */
+}
+
+/* Keep vertical scrolling smooth on iOS */
+body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain; /* reduce “rubber band” jump */
+  touch-action: pan-y;            /* prefer vertical gestures */
+}
+
+/* root must not introduce horizontal scroll */
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* ✅ If you wrap App with .app-shell (from App.jsx fix) */
+.app-shell {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  touch-action: pan-y;
+}
+
+/* ✅ Prevent elements from causing accidental horizontal scroll */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+/* ✅ iOS Safe Area padding helpers (Topbar / bottom bars if needed) */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
 /* Better text rendering */
 :root {
   font-synthesis: none;
@@ -114,6 +162,11 @@ button {
   backdrop-filter: blur(22px);
   -webkit-backdrop-filter: blur(22px);
   border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* ✅ Critical: background/overlay layers should never block scroll */
+.pointer-events-none {
+  pointer-events: none !important;
 }
 
 /* =========================================================
@@ -267,3 +320,4 @@ button {
     transition: none !important;
   }
 }
+
