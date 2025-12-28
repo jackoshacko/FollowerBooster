@@ -71,6 +71,7 @@ function Chip({ children, tone = "neutral", title }) {
     info: "border-sky-500/25 bg-sky-500/10 text-sky-100",
     violet: "border-violet-500/25 bg-violet-500/10 text-violet-100",
   };
+
   return (
     <span
       title={title}
@@ -194,10 +195,8 @@ function SidebarShell({
       className={cls(
         "relative p-4",
         mobile ? "h-[100dvh]" : "h-screen",
-        // ✅ FIX: mobile drawer must NOT be transparent
-        mobile
-          ? "fb-drawer border-r border-white/10"
-          : "border-r border-white/10 bg-black/35 backdrop-blur-xl shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+        "border-r border-white/10 bg-black/35 backdrop-blur-xl",
+        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         collapsed ? "w-[98px]" : "w-[310px]"
       )}
     >
@@ -218,9 +217,7 @@ function SidebarShell({
               <div className="text-sm font-extrabold tracking-tight text-white truncate">
                 {title || "FollowerBooster"}
               </div>
-              <div className="text-xs text-zinc-200/60 truncate">
-                {loading ? "Loading…" : subtitle || "Authenticated"}
-              </div>
+              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
             </div>
           ) : null}
         </div>
@@ -260,8 +257,7 @@ function SidebarShell({
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
-        {/* ✅ FIX: iOS scroll stability inside drawer */}
-        <div className={cls("min-h-0 flex-1 overflow-y-auto pr-1", mobile ? "fb-drawer-scroll" : "")}>
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
         {footer ? <div className="mt-3">{footer}</div> : null}
@@ -279,6 +275,7 @@ function fmtMoney(n, cur = "EUR") {
       maximumFractionDigits: 2,
     }).format(v);
   } catch {
+    // ✅ OVO TI JE PUKLO U JEDNOJ LINIJI: falili backticks
     return `${Math.round(v * 100) / 100} ${cur}`;
   }
 }
@@ -356,9 +353,9 @@ export default function Sidebar({ mobile = false, onClose }) {
         const list = Array.isArray(orders.value) ? orders.value : [];
         setMyOrdersCount(list.length);
 
-        let pending = 0,
-          processing = 0,
-          failed = 0;
+        let pending = 0;
+        let processing = 0;
+        let failed = 0;
 
         for (const o of list) {
           const st = String(o?.status || "").toLowerCase();
@@ -667,7 +664,6 @@ export default function Sidebar({ mobile = false, onClose }) {
     );
   }
 
-  // ✅ mobile mode: never collapsed (panel width stable)
   return (
     <SidebarShell
       mobile
