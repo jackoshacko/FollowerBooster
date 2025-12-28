@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-
     "seed:services": "node src/seed/runSeedServices.js",
     "seed:all": "node src/seed/runSeedServices.js"
   },
@@ -24,6 +23,8 @@
     "mongo-sanitize": "^1.1.0",
     "mongoose": "^8.8.4",
     "node-fetch": "^3.3.2",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "pino": "^9.5.0",
     "pino-http": "^10.3.0",
     "xss": "^1.0.15",

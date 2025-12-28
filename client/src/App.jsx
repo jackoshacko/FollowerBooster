@@ -10,6 +10,7 @@ import RequireAdmin from "./components/RequireAdmin.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import NoAccess from "./pages/NoAccess.jsx";
+import AuthCallback from "./pages/AuthCallback.jsx"; // ✅ DODATO
 
 // app pages
 import Dashboard from "./pages/Dashboard.jsx";
@@ -24,8 +25,6 @@ import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import AdminOrders from "./pages/admin/AdminOrders.jsx";
 import AdminUsers from "./pages/admin/AdminUsers.jsx";
 import AdminTransactions from "./pages/admin/AdminTransactions.jsx";
-// ⛔ PayPalAdmin privremeno isključen (ne postoji fajl / case issue)
-// import PayPalAdmin from "./pages/admin/PayPalAdmin.jsx";
 
 function AdminGuard() {
   return (
@@ -42,6 +41,9 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/no-access" element={<NoAccess />} />
+
+      {/* ✅ GOOGLE CALLBACK (MORA BITI PUBLIC) */}
+      <Route path="/auth/callback" element={<AuthCallback />} />
 
       {/* ================= PROTECTED APP ================= */}
       <Route
@@ -69,9 +71,6 @@ export default function App() {
           <Route path="orders" element={<AdminOrders />} />
           <Route path="users" element={<AdminUsers />} />
           <Route path="transactions" element={<AdminTransactions />} />
-
-          {/* PayPal admin privremeno isključen */}
-          {/* <Route path="paypal" element={<PayPalAdmin />} /> */}
         </Route>
       </Route>
 
@@ -80,3 +79,4 @@ export default function App() {
     </Routes>
   );
 }
+

@@ -3,6 +3,9 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 
+import passport from "passport";
+import { initPassport } from "./auth/passport.js";
+
 // ================= PUBLIC ROUTES =================
 import healthRoutes from "./routes/health.routes.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -115,7 +118,6 @@ export function createApp({ corsOrigins = [] } = {}) {
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 
-    // ✅ IMPORTANT: include ALL headers browser may preflight
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -123,8 +125,6 @@ export function createApp({ corsOrigins = [] } = {}) {
       "x-request-id",
       "Accept",
       "Origin",
-
-      // ✅ THIS FIXES YOUR ERROR:
       "ngrok-skip-browser-warning",
     ],
 
@@ -133,16 +133,19 @@ export function createApp({ corsOrigins = [] } = {}) {
     optionsSuccessStatus: 204,
   };
 
-  // ✅ Apply CORS
   app.use(cors(corsOptions));
-
-  // ✅ Properly handle OPTIONS everywhere (preflight)
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES (ok to keep, FE must not use cookies)
+  // COOKIES
   // =====================================================
   app.use(cookieParser());
+
+  // =====================================================
+  // ✅ PASSPORT INIT (MUST BE BEFORE /auth routes)
+  // =====================================================
+  initPassport();               // registers GoogleStrategy
+  app.use(passport.initialize()); // enables passport on requests
 
   // =====================================================
   // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
