@@ -24,6 +24,9 @@ import {
   X,
   Lock,
   FileText,
+  Plus,
+  CreditCard,
+  RotateCw,
 } from "lucide-react";
 
 import bgSmm2 from "../assets/backgroundsmm2.jpg";
@@ -112,7 +115,8 @@ function normalizeStatus(raw) {
   if (["failed", "fail", "error"].includes(x)) return "failed";
   if (["canceled", "cancelled", "refunded", "refund"].includes(x)) return "failed";
   if (["pending", "queued", "queue", "waiting", "created", "new"].includes(x)) return "pending";
-  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x)) return "processing";
+  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x))
+    return "processing";
   return x || "processing";
 }
 
@@ -184,7 +188,7 @@ function Card({ title, right, icon: Icon, children, className }) {
                 <Icon className="h-4 w-4" />
               </div>
             ) : null}
-            <div className="min-w-0 truncate text-sm text-zinc-200/80">{title}</div>
+            <div className="min-w-0 truncate text-sm font-semibold text-zinc-200/85">{title}</div>
           </div>
           {right ? <div className="shrink-0 text-xs text-zinc-200/60">{right}</div> : null}
         </header>
@@ -212,7 +216,7 @@ function Chip({ children, tone = "neutral", className = "" }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold",
         tones[tone] || tones.neutral,
         className
       )}
@@ -276,9 +280,7 @@ function MiniBars({ data, height = 52 }) {
 }
 
 function RowItem({ left, right, onCopy, onOpen }) {
-  const glass = DISABLE_BLUR_ON_IOS
-    ? "bg-white/6"
-    : "bg-white/5 supports-[backdrop-filter]:backdrop-blur-md";
+  const glass = DISABLE_BLUR_ON_IOS ? "bg-white/6" : "bg-white/5 supports-[backdrop-filter]:backdrop-blur-md";
 
   return (
     <div
@@ -291,6 +293,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
       <div className="min-w-0">{left}</div>
       <div className="flex shrink-0 items-center gap-2">
         {right ? <div className="text-sm font-semibold text-white">{right}</div> : null}
+
         {onCopy ? (
           <button
             type="button"
@@ -301,6 +304,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
             <Copy className="h-4 w-4" />
           </button>
         ) : null}
+
         {onOpen ? (
           <button
             type="button"
@@ -332,6 +336,23 @@ function Masonry({ children }) {
         ))}
       </div>
     </>
+  );
+}
+
+function EmptyState({ icon: Icon, title, text, actions }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 rounded-2xl border border-white/10 bg-white/5 p-2">
+          <Icon className="h-5 w-5 text-white/85" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-white">{title}</div>
+          <div className="mt-1 text-xs text-zinc-100/60">{text}</div>
+          {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -378,7 +399,10 @@ export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const lastSig = useRef("");
+  const inFlight = useRef(false);
 
   function showToast(msg) {
     setToast(msg);
@@ -427,21 +451,25 @@ export default function Dashboard() {
   }
 
   async function load({ silent = false } = {}) {
+    if (inFlight.current) return; // ✅ prevents race conditions on iOS/webviews
+    inFlight.current = true;
+
     setS((p) => ({ ...p, loading: !silent, error: "" }));
+    if (!silent) setIsRefreshing(true);
 
     try {
       const d = await api.get("/api/dashboard");
-      const nextCurrency = String(d.currency || s.currency || "EUR").toUpperCase();
+      const nextCurrency = String(d?.currency || s.currency || "EUR").toUpperCase();
 
-      const pendingOrders = d.pendingOrders;
-      const processingOrders = d.processingOrders;
-      const completedOrders = d.completedOrders;
-      const failedOrders = d.failedOrders;
+      const pendingOrders = d?.pendingOrders;
+      const processingOrders = d?.processingOrders;
+      const completedOrders = d?.completedOrders;
+      const failedOrders = d?.failedOrders;
 
       const hasOrderBreakdown =
         pendingOrders != null || processingOrders != null || completedOrders != null || failedOrders != null;
 
-      const series7d = d.series7d || { labels: [], orders: [], topups: [] };
+      const series7d = d?.series7d || { labels: [], orders: [], topups: [] };
       const seriesOrdersLen = Array.isArray(series7d?.orders) ? series7d.orders.length : 0;
 
       let fallback = null;
@@ -455,8 +483,7 @@ export default function Dashboard() {
       const computedCompleted = safeNum(completedOrders ?? fbCounts.completed ?? 0);
       const computedFailed = safeNum(failedOrders ?? fbCounts.failed ?? 0);
 
-      const computedActive =
-        d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
+      const computedActive = d?.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
 
       const mergedSeries7d = {
         labels:
@@ -468,18 +495,22 @@ export default function Dashboard() {
             ? series7d.orders
             : fallback?.series7dOrders?.orders || [0, 0, 0, 0, 0, 0, 0],
         topups:
-          Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
+          Array.isArray(series7d?.topups) && series7d.topups.length === 7
+            ? series7d.topups
+            : [0, 0, 0, 0, 0, 0, 0],
       };
 
       const lastOrders =
-        Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
+        Array.isArray(d?.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
+
+      const lastTopups = Array.isArray(d?.lastTopups) ? d.lastTopups : [];
 
       const next = {
         loading: false,
         error: "",
         lastUpdatedAt: new Date().toISOString(),
 
-        balance: safeNum(d.balance ?? s.balance ?? 0),
+        balance: safeNum(d?.balance ?? s.balance ?? 0),
         currency: nextCurrency,
 
         activeOrders: computedActive,
@@ -488,19 +519,19 @@ export default function Dashboard() {
         completedOrders: computedCompleted,
         failedOrders: computedFailed,
 
-        spent30d: safeNum(d.spent30d ?? s.spent30d ?? 0),
-        spentAllTime: safeNum(d.spentAllTime ?? s.spentAllTime ?? 0),
+        spent30d: safeNum(d?.spent30d ?? s.spent30d ?? 0),
+        spentAllTime: safeNum(d?.spentAllTime ?? s.spentAllTime ?? 0),
 
-        successRate7d: d.successRate7d == null ? s.successRate7d : safeNum(d.successRate7d),
-        avgFulfillMins7d: d.avgFulfillMins7d == null ? s.avgFulfillMins7d : safeNum(d.avgFulfillMins7d),
+        successRate7d: d?.successRate7d == null ? s.successRate7d : safeNum(d.successRate7d),
+        avgFulfillMins7d: d?.avgFulfillMins7d == null ? s.avgFulfillMins7d : safeNum(d.avgFulfillMins7d),
 
-        lastTopups: Array.isArray(d.lastTopups) ? d.lastTopups : s.lastTopups || [],
+        lastTopups,
         lastOrders,
 
         series7d: mergedSeries7d,
 
-        provider: d.provider ?? s.provider ?? null,
-        topServices: d.topServices ?? s.topServices ?? null,
+        provider: d?.provider ?? s.provider ?? null,
+        topServices: d?.topServices ?? s.topServices ?? null,
       };
 
       const sig = `${next.balance}|${next.activeOrders}|${next.pendingOrders}|${next.processingOrders}|${next.completedOrders}|${next.failedOrders}`;
@@ -514,11 +545,15 @@ export default function Dashboard() {
         loading: false,
         error: e?.message || "Failed to load dashboard.",
       }));
+    } finally {
+      inFlight.current = false;
+      if (!silent) setTimeout(() => setIsRefreshing(false), 250);
     }
   }
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       if (!alive) return;
       await load();
@@ -556,12 +591,12 @@ export default function Dashboard() {
 
   const ordersBars = useMemo(() => {
     const arr = s.series7d?.orders || [];
-    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
+    return arr.length === 7 ? arr : [0, 0, 0, 0, 0, 0, 0];
   }, [s.series7d]);
 
   const topupsBars = useMemo(() => {
     const arr = s.series7d?.topups || [];
-    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
+    return arr.length === 7 ? arr : [0, 0, 0, 0, 0, 0, 0];
   }, [s.series7d]);
 
   const orders7dTotal = useMemo(() => ordersBars.reduce((a, b) => a + safeNum(b, 0), 0), [ordersBars]);
@@ -650,19 +685,15 @@ export default function Dashboard() {
     });
   }, [s.lastTopups, search]);
 
+  const hasAnyOrders = totalOrdersSnapshot > 0 || (Array.isArray(s.lastOrders) && s.lastOrders.length > 0);
+  const hasAnyTopups = (Array.isArray(s.lastTopups) && s.lastTopups.length > 0) || topups7dTotal > 0;
+
   return (
-    <div className="dashboard-root w-full overflow-x-hidden pb-[max(env(safe-area-inset-bottom),16px)]">
+    <div className="w-full overflow-x-hidden pb-[max(env(safe-area-inset-bottom),16px)]">
+      {/* ✅ IMPORTANT: NO html/body styles here (that caused iOS weirdness).
+          All global CSS goes in index.css. */}
       <style>{`
-        :root { -webkit-text-size-adjust: 100%; }
-        html, body { width:100%; overflow-x:hidden; }
-
-        .dashboard-scroll{
-          -webkit-overflow-scrolling: touch;
-          touch-action: pan-y;
-          overscroll-behavior-y: contain;
-        }
-
-        /* Desktop masonry only */
+        /* Desktop masonry only (safe here; doesn't touch html/body) */
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
@@ -677,8 +708,6 @@ export default function Dashboard() {
             line-height: 1.25rem !important;
           }
         }
-
-        .no-x-overflow * { max-width: 100%; }
       `}</style>
 
       {toast ? (
@@ -687,23 +716,33 @@ export default function Dashboard() {
         </div>
       ) : null}
 
-      <div className="dashboard-scroll no-x-overflow mx-auto w-full max-w-[1200px] space-y-5 px-4 sm:px-5">
+      {/* ✅ Single scroll only: page scroll. No nested "overflow-y-auto" wrappers. */}
+      <div className="mx-auto w-full max-w-[1200px] space-y-5 px-4 sm:px-5">
         {/* ===== Header ===== */}
         <div className="mobile-nozoom flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           {/* Left (title/meta) */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
+
               <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
                 <Sparkles className="h-3.5 w-3.5" />
                 {autoRefresh ? "Live" : "Paused"}
               </Chip>
+
               <Chip tone="violet">
                 <Zap className="h-3.5 w-3.5" /> 2050 Mode
               </Chip>
+
               <Chip tone="info">
                 <Lock className="h-3.5 w-3.5" /> Protected
               </Chip>
+
+              {isRefreshing ? (
+                <Chip tone="neutral">
+                  <RotateCw className="h-3.5 w-3.5 animate-spin" /> Syncing
+                </Chip>
+              ) : null}
             </div>
 
             <div className="mt-1 text-sm text-zinc-100/70">
@@ -725,8 +764,8 @@ export default function Dashboard() {
 
           {/* Right (controls) */}
           <div className="flex w-full flex-col gap-2 lg:w-[540px]">
-            {/* Actions row: ALWAYS row on desktop, stacked grid on mobile */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-4">
+            {/* Actions row */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button
                 onClick={() => {
                   load();
@@ -744,7 +783,7 @@ export default function Dashboard() {
                 className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
                 href="/wallet"
               >
-                <Wallet className="h-4 w-4" /> Wallet
+                <CreditCard className="h-4 w-4" /> Top up
               </a>
 
               <a
@@ -754,7 +793,7 @@ export default function Dashboard() {
                 )}
                 href="/create-order"
               >
-                <ShoppingCart className="h-4 w-4" /> Create
+                <Plus className="h-4 w-4" /> Create
               </a>
 
               <a
@@ -769,12 +808,12 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button
                 onClick={() => setAutoRefresh((x) => !x)}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
+                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
               >
                 {autoRefresh ? "Pause live" : "Resume live"}
               </button>
 
-              <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
+              <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/80">
                 <span className="opacity-80">Every</span>
                 <select
                   value={refreshEvery}
@@ -791,7 +830,7 @@ export default function Dashboard() {
               <button
                 onClick={() => setOnlyProblems((x) => !x)}
                 className={cn(
-                  "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs",
+                  "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold",
                   onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
                   "hover:bg-white/10 active:scale-[0.99]"
                 )}
@@ -803,7 +842,7 @@ export default function Dashboard() {
             </div>
 
             {/* Search row */}
-            <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80 sm:text-sm">
+            <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/80 sm:text-sm">
               <Search className="h-4 w-4 shrink-0 opacity-80" />
               <input
                 value={search}
@@ -827,10 +866,10 @@ export default function Dashboard() {
 
         {s.error ? (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <div className="text-sm text-red-200">⚠️ {s.error}</div>
+            <div className="text-sm font-semibold text-red-200">⚠️ {s.error}</div>
             <button
               onClick={() => load()}
-              className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100 hover:bg-red-500/30 active:scale-[0.99]"
+              className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm font-semibold text-red-100 hover:bg-red-500/30 active:scale-[0.99]"
               type="button"
             >
               Retry
@@ -842,7 +881,9 @@ export default function Dashboard() {
           <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
-                <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
+                <div className="text-4xl font-black tracking-tight">
+                  {loading ? "—" : fmtMoney(s.balance, currency)}
+                </div>
                 <div className="flex flex-wrap gap-2">
                   <Chip tone="info">
                     <Boxes className="h-3.5 w-3.5" /> Orders snapshot: {fmtInt(totalOrdersSnapshot)}
@@ -859,15 +900,15 @@ export default function Dashboard() {
 
               <div className="grid gap-2 sm:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-zinc-100/60">Spent (30d)</div>
-                  <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
+                  <div className="text-xs font-semibold text-zinc-100/60">Spent (30d)</div>
+                  <div className="mt-1 text-lg font-black">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-zinc-100/60">All-time spend</div>
-                  <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
+                  <div className="text-xs font-semibold text-zinc-100/60">All-time spend</div>
+                  <div className="mt-1 text-lg font-black">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-zinc-100/60">Health</div>
+                  <div className="text-xs font-semibold text-zinc-100/60">Health</div>
                   <div className="mt-1 flex items-center gap-2">
                     <Chip tone={health.tone}>
                       <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
@@ -875,17 +916,73 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
+
+              {!hasAnyTopups ? (
+                <div className="mt-1">
+                  <EmptyState
+                    icon={CreditCard}
+                    title="No top-ups yet"
+                    text="Top up your wallet to place orders instantly."
+                    actions={
+                      <>
+                        <a
+                          href="/wallet"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
+                        >
+                          <CreditCard className="h-4 w-4" /> Go to Wallet
+                        </a>
+                        <a
+                          href="/services"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 active:scale-[0.99]"
+                        >
+                          <Layers className="h-4 w-4" /> Browse Services
+                        </a>
+                      </>
+                    }
+                  />
+                </div>
+              ) : null}
             </div>
           </Card>
 
           <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
-            <KpiValue loading={loading} value={loading ? "" : fmtInt(s.activeOrders)} sub="Pending / processing orders right now." />
+            <KpiValue
+              loading={loading}
+              value={loading ? "" : fmtInt(s.activeOrders)}
+              sub="Pending / processing orders right now."
+            />
             <Divider />
             <div className="flex flex-wrap gap-2 text-xs">
               <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
               <Chip tone="info">Processing {fmtInt(s.processingOrders)}</Chip>
               <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
             </div>
+
+            {!hasAnyOrders ? (
+              <div className="mt-3">
+                <EmptyState
+                  icon={ShoppingCart}
+                  title="No orders yet"
+                  text="Create your first order in under 10 seconds."
+                  actions={
+                    <>
+                      <a
+                        href="/create-order"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
+                      >
+                        <Plus className="h-4 w-4" /> Create order
+                      </a>
+                      <a
+                        href="/services"
+                        className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 active:scale-[0.99]"
+                      >
+                        <Layers className="h-4 w-4" /> Pick a service
+                      </a>
+                    </>
+                  }
+                />
+              </div>
+            ) : null}
           </Card>
 
           <Card title="Quality (7d)" right={loading ? "" : "Success + speed"} icon={ShieldCheck}>
@@ -898,16 +995,22 @@ export default function Dashboard() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs text-zinc-100/60">Success rate</div>
-                    <div className="text-3xl font-black tracking-tight">{s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}</div>
+                    <div className="text-xs font-semibold text-zinc-100/60">Success rate</div>
+                    <div className="text-3xl font-black tracking-tight">
+                      {s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-xs text-zinc-100/60 text-right">Avg fulfill</div>
-                    <div className="text-3xl font-black tracking-tight text-right">{s.avgFulfillMins7d == null ? "—" : `${Math.round(s.avgFulfillMins7d)}m`}</div>
+                    <div className="text-xs font-semibold text-zinc-100/60 text-right">Avg fulfill</div>
+                    <div className="text-3xl font-black tracking-tight text-right">
+                      {s.avgFulfillMins7d == null ? "—" : `${Math.round(s.avgFulfillMins7d)}m`}
+                    </div>
                   </div>
                 </div>
 
-                <div className="text-xs text-zinc-100/60">7-day performance estimate — designed for scaling decisions.</div>
+                <div className="text-xs text-zinc-100/60">
+                  7-day performance estimate — designed for scaling decisions.
+                </div>
 
                 <div className="flex flex-wrap gap-2">
                   <Chip tone={health.tone}>{health.msg}</Chip>
@@ -982,10 +1085,12 @@ export default function Dashboard() {
                   <FileText className="h-3.5 w-3.5" /> Policies
                 </Chip>
               </div>
+
               <div className="text-sm text-zinc-100/70">
                 Access is restricted to authenticated users. Payments and top-ups are processed by supported providers.
                 We store only the minimum required data for account access and order processing.
               </div>
+
               <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
                 <a className="underline hover:text-white" href="/terms">
                   Terms
@@ -1058,7 +1163,19 @@ export default function Dashboard() {
                 })}
               </div>
             ) : (
-              <div className="text-sm text-zinc-100/60">No top-ups yet. Go to Wallet and top up.</div>
+              <EmptyState
+                icon={CreditCard}
+                title="No top-ups found"
+                text="Top up your wallet to unlock instant checkout."
+                actions={
+                  <a
+                    href="/wallet"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
+                  >
+                    <CreditCard className="h-4 w-4" /> Go to Wallet
+                  </a>
+                }
+              />
             )}
           </Card>
 
@@ -1073,7 +1190,8 @@ export default function Dashboard() {
               <div className="space-y-2">
                 {filteredOrders.slice(0, 10).map((o) => {
                   const id = o.id || o._id;
-                  const status = String(o.status || "—").toLowerCase();
+                  const statusRaw = String(o.status || "—");
+                  const status = statusRaw.toLowerCase();
                   const created = o.createdAt || o.created_at || o.time;
                   const serviceName = o.serviceName || o.service?.name || o.name || "Service";
                   const qty = o.quantity ?? o.qty ?? "—";
@@ -1097,8 +1215,8 @@ export default function Dashboard() {
                       left={
                         <div className="min-w-0">
                           <div className="flex min-w-0 items-center gap-2">
-                            <Chip tone={tone}>{status}</Chip>
-                            <span className="min-w-0 truncate text-sm text-zinc-100">{serviceName}</span>
+                            <Chip tone={tone}>{statusRaw}</Chip>
+                            <span className="min-w-0 truncate text-sm font-semibold text-zinc-100">{serviceName}</span>
                           </div>
                           <div className="mt-1 text-xs text-zinc-100/60">
                             {created ? relTime(created) : ""} • qty {qty} • ID {shortId(id)}
@@ -1120,13 +1238,25 @@ export default function Dashboard() {
                 })}
               </div>
             ) : (
-              <div className="text-sm text-zinc-100/60">No orders yet. Create your first order.</div>
+              <EmptyState
+                icon={ShoppingCart}
+                title="No orders found"
+                text="Create your first order — then watch the live metrics update instantly."
+                actions={
+                  <a
+                    href="/create-order"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
+                  >
+                    <Plus className="h-4 w-4" /> Create order
+                  </a>
+                }
+              />
             )}
           </Card>
         </Masonry>
 
         <div className="text-xs text-zinc-100/50">
-          Mobile: stacked controls + grid ✅. Tablet/desktop: masonry columns ✅. iOS: blur-safe ✅.
+          Mobile: single page scroll ✅. Tablet/desktop: masonry columns ✅. iOS: blur-safe ✅. Race-proof refresh ✅.
         </div>
       </div>
     </div>

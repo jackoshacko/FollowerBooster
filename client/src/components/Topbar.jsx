@@ -77,24 +77,40 @@ export default function Topbar() {
     setOpen(false);
   }, [loc.pathname]);
 
-  // ✅ iOS-safe lock: keep it simple + stable
+  // ✅ PERFECT iOS lock (keeps scroll position)
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
 
     if (!open) {
+      // restore scroll
+      const y = Number(body.dataset?.scrollY || "0");
+      body.style.position = "";
+      body.style.top = "";
+      body.style.left = "";
+      body.style.right = "";
+      body.style.width = "";
       body.style.overflow = "";
       html.style.overscrollBehavior = "";
+      if (y) window.scrollTo(0, y);
+      if (body.dataset) body.dataset.scrollY = "";
       return;
     }
 
-    const prevOverflow = body.style.overflow;
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    if (body.dataset) body.dataset.scrollY = String(scrollY);
+
+    // lock page behind drawer
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
     body.style.overflow = "hidden";
     html.style.overscrollBehavior = "none";
 
     return () => {
-      body.style.overflow = prevOverflow || "";
-      html.style.overscrollBehavior = "";
+      // restore happens in the !open branch on next render
     };
   }, [open]);
 
@@ -401,24 +417,20 @@ export default function Topbar() {
       </header>
 
       {open ? (
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          style={{ WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}
-        >
-          {/* ✅ darker overlay */}
+        <div className="fixed inset-0 z-40 md:hidden">
           <div
-            className="absolute inset-0 bg-black/85 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/85"
             onClick={() => setOpen(false)}
           />
 
-          {/* ✅ drawer wrapper MUST scroll on iOS */}
+          {/* Drawer: scroll INSIDE (webkit scroll) */}
           <div
             ref={drawerRef}
             className={cn(
-              "absolute left-0 top-0 h-full w-[88%] max-w-[380px]",
+              "absolute left-0 top-0 h-[100dvh] w-[88%] max-w-[380px]",
               "overflow-y-auto overflow-x-hidden",
               "overscroll-contain",
-              "touch-pan-y"
+              "[scrollbar-width:thin]"
             )}
             style={{
               paddingTop: "env(safe-area-inset-top)",
