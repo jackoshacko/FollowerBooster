@@ -14,7 +14,7 @@ export function getToken() {
 }
 
 export function setToken(token) {
-  if (token) localStorage.setItem("token", token);
+  if (token) localStorage.setItem("token", String(token));
   else localStorage.removeItem("token");
 }
 
@@ -94,17 +94,18 @@ function looksLikeNgrokHtml(text) {
   return t.includes("<html") && t.includes("ngrok");
 }
 
-/* ================= ENV / NGROK HELPERS ================= */
-const IS_VERCEL = typeof window !== "undefined" && String(window.location.hostname).includes("vercel.app");
-const IS_LOCAL_API =
-  API.includes("localhost") || API.includes("127.0.0.1") || API.includes("0.0.0.0");
+/* ================= ENV / NGROK HEADER ================= */
+// ❌ ngrok-skip-browser-warning u browseru pravi CORS preflight probleme.
+// ✅ Dozvoli ga samo u lokalnom devu, i samo ako si ti baš na localhost-u.
+const IS_BROWSER = typeof window !== "undefined";
+const HOST = IS_BROWSER ? String(window.location.hostname) : "";
+const IS_VERCEL = HOST.includes("vercel.app");
 
-// ✅ Only add ngrok header in LOCAL dev (optional). NEVER on Vercel/production browser.
 function shouldSendNgrokSkipHeader() {
-  // If you really want it locally when calling an ngrok URL from localhost:
-  // - allow when NOT on vercel AND api looks like ngrok
-  const apiLooksNgrok = API.includes("ngrok-free.dev") || API.includes("ngrok.io");
-  return !IS_VERCEL && apiLooksNgrok && IS_LOCAL_API; // safest
+  if (!IS_BROWSER) return false;
+  if (IS_VERCEL) return false; // NEVER on vercel/prod
+  const isLocalHost = HOST === "localhost" || HOST === "127.0.0.1";
+  return isLocalHost; // only local dev
 }
 
 /* ================= CORE REQUEST (TOKEN-ONLY) ================= */
@@ -112,7 +113,7 @@ export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
 
-  // HARD: zabrani da iko prosledi credentials/mode koji sjebe CORS
+  // zabrani da neko prosledi credentials/mode i sjebe CORS
   const { credentials, mode, headers: extraHeaders, body, ...rest } = options;
 
   const hasBody = body !== undefined && body !== null;
@@ -135,7 +136,7 @@ export async function request(path, options = {}) {
     ...(extraHeaders || {}),
   };
 
-  // ❌ DO NOT SEND THIS HEADER IN PRODUCTION BROWSER (causes CORS preflight fail)
+  // ✅ only local dev (optional)
   if (shouldSendNgrokSkipHeader()) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
@@ -153,8 +154,7 @@ export async function request(path, options = {}) {
 
   if (looksLikeNgrokHtml(text)) {
     throw new Error(
-      `NGROK returned HTML instead of API response. Check ngrok forwarding + VITE_API_URL.\n` +
-        `URL: ${apiUrl(path)}`
+      `NGROK returned HTML instead of API response. Check ngrok + VITE_API_URL.\nURL: ${apiUrl(path)}`
     );
   }
 
@@ -176,6 +176,22 @@ export async function request(path, options = {}) {
 }
 
 /* ================= API WRAPPER ================= */
+function extractToken(out) {
+  return (
+    out?.token ||
+    out?.accessToken ||
+    out?.access_token ||
+    out?.data?.token ||
+    out?.data?.accessToken ||
+    out?.data?.access_token ||
+    ""
+  );
+}
+
+function extractUser(out) {
+  return out?.user || out?.data?.user || null;
+}
+
 export const api = {
   get: (p) => request(p),
   post: (p, b) => request(p, { method: "POST", body: b }),
@@ -185,21 +201,13 @@ export const api = {
 
   me: () => request("/api/me"),
 
-   login: async (payload) => {
+  login: async (payload) => {
     const out = await request("/auth/login", { method: "POST", body: payload });
 
-    // ✅ accept multiple token keys
-    const t =
-      out?.token ||
-      out?.accessToken ||
-      out?.access_token ||
-      out?.data?.token ||
-      out?.data?.accessToken ||
-      out?.data?.access_token;
+    const t = extractToken(out);
+    if (t) setToken(t);
 
-    if (t) setToken(String(t));
-
-    const u = out?.user || out?.data?.user;
+    const u = extractUser(out);
     if (u) {
       setUser(u);
       if (u.role) setRole(u.role);
@@ -211,17 +219,10 @@ export const api = {
   register: async (payload) => {
     const out = await request("/auth/register", { method: "POST", body: payload });
 
-    const t =
-      out?.token ||
-      out?.accessToken ||
-      out?.access_token ||
-      out?.data?.token ||
-      out?.data?.accessToken ||
-      out?.data?.access_token;
+    const t = extractToken(out);
+    if (t) setToken(t);
 
-    if (t) setToken(String(t));
-
-    const u = out?.user || out?.data?.user;
+    const u = extractUser(out);
     if (u) {
       setUser(u);
       if (u.role) setRole(u.role);
@@ -229,4 +230,10 @@ export const api = {
 
     return out;
   },
+
+  logoutLocal: () => {
+    clearAuthLocal();
+    redirectToLogin();
+  },
+};
 
