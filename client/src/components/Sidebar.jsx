@@ -195,11 +195,13 @@ function SidebarShell({
       className={cls(
         "relative p-4",
         mobile ? "h-[100dvh]" : "h-screen",
-        "border-r border-white/10 bg-black/35 backdrop-blur-xl",
+        // ✅ KEY FIX: mobile sidebar MUST be solid (no see-through)
+        mobile
+          ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
+          : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         "overflow-x-clip",
-        // ✅ MOBILE WIDTH FIX (no more fixed 310px on iPhone)
-        mobile ? "w-[88vw] max-w-[380px]" : (collapsed ? "w-[98px]" : "w-[310px]")
+        collapsed ? "w-[98px]" : "w-[310px]"
       )}
     >
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -261,6 +263,7 @@ function SidebarShell({
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
+        {/* ✅ keep internal scroll area */}
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
@@ -282,9 +285,6 @@ function fmtMoney(n, cur = "EUR") {
     return `${Math.round(v * 100) / 100} ${cur}`;
   }
 }
-
-// ======= the rest of your Sidebar component stays IDENTICAL =======
-// (I’m keeping your logic 1:1; only SidebarShell width changed)
 
 export default function Sidebar({ mobile = false, onClose }) {
   const navigate = useNavigate();
@@ -513,6 +513,33 @@ export default function Sidebar({ mobile = false, onClose }) {
           <ArrowUpRight className="h-4 w-4" /> Wallet
         </button>
       </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={() => navigate("/create-order")}
+          className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
+        >
+          Create order
+        </button>
+        <button
+          onClick={() => navigate("/services")}
+          className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+        >
+          Services
+        </button>
+      </div>
+
+      {isAdmin ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] text-zinc-200/70">Admin (30d)</div>
+            <Chip tone="neutral">
+              <BarChart3 className="h-3.5 w-3.5" />{" "}
+              {revenue30d != null ? `${Number(revenue30d).toFixed?.(2) ?? revenue30d} EUR` : "—"}
+            </Chip>
+          </div>
+        </div>
+      ) : null}
     </div>
   ) : (
     <div className="mt-3 flex justify-center">
@@ -520,15 +547,97 @@ export default function Sidebar({ mobile = false, onClose }) {
     </div>
   );
 
+  // ✅ KEY FIX: remove the inner "Close" button (you already have X in Topbar drawer)
   const content = (
     <>
       <Section title="User" icon={Shield} collapsed={collapsed}>
         <Item to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={navClick} />
         <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={navClick} />
         <Item to="/create-order" icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={navClick} />
-        <Item to="/orders" icon={ListChecks} label="Orders" collapsed={collapsed} onClick={navClick} />
-        <Item to="/wallet" icon={Wallet} label="Wallet" collapsed={collapsed} onClick={navClick} />
+
+        <Item
+          to="/orders"
+          icon={ListChecks}
+          label="Orders"
+          collapsed={collapsed}
+          onClick={navClick}
+          right={
+            myOrdersCount !== null ? (
+              <Badge
+                title="Your orders"
+                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
+              >
+                {myOrdersCount}
+              </Badge>
+            ) : null
+          }
+        />
+
+        <Item
+          to="/wallet"
+          icon={Wallet}
+          label="Wallet"
+          collapsed={collapsed}
+          onClick={navClick}
+          right={
+            !collapsed && walletSnap.balance != null ? (
+              <Badge title="Balance" tone={walletSnap.balance > 0 ? "green" : "amber"}>
+                {fmtMoney(walletSnap.balance, walletSnap.currency)}
+              </Badge>
+            ) : null
+          }
+        />
       </Section>
+
+      <Section title="Account" icon={Settings} collapsed={collapsed}>
+        <div
+          className={cls(
+            "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
+            collapsed ? "hidden" : ""
+          )}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
+              <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
+            </div>
+            <button
+              onClick={hardLogout}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4" /> Logout
+            </button>
+          </div>
+        </div>
+      </Section>
+
+      {isAdmin ? (
+        <Section title="Admin" icon={Wrench} collapsed={collapsed}>
+          <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={navClick} />
+
+          <Item
+            to="/admin/orders"
+            icon={ListChecks}
+            label="Orders"
+            collapsed={collapsed}
+            onClick={navClick}
+            right={
+              Number.isFinite(pendingOrders) && pendingOrders > 0 ? (
+                <Badge tone="amber" title="Pending/Processing orders">
+                  {pendingOrders}
+                </Badge>
+              ) : (
+                <Badge title="Pending/Processing orders">0</Badge>
+              )
+            }
+          />
+
+          <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={navClick} />
+        </Section>
+      ) : null}
     </>
   );
 
