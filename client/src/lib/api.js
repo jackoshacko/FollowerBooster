@@ -185,29 +185,48 @@ export const api = {
 
   me: () => request("/api/me"),
 
-  login: async (payload) => {
+   login: async (payload) => {
     const out = await request("/auth/login", { method: "POST", body: payload });
-    if (out?.token) setToken(out.token);
-    if (out?.user) {
-      setUser(out.user);
-      if (out.user.role) setRole(out.user.role);
+
+    // ✅ accept multiple token keys
+    const t =
+      out?.token ||
+      out?.accessToken ||
+      out?.access_token ||
+      out?.data?.token ||
+      out?.data?.accessToken ||
+      out?.data?.access_token;
+
+    if (t) setToken(String(t));
+
+    const u = out?.user || out?.data?.user;
+    if (u) {
+      setUser(u);
+      if (u.role) setRole(u.role);
     }
+
     return out;
   },
 
   register: async (payload) => {
     const out = await request("/auth/register", { method: "POST", body: payload });
-    if (out?.token) setToken(out.token);
-    if (out?.user) {
-      setUser(out.user);
-      if (out.user.role) setRole(out.user.role);
+
+    const t =
+      out?.token ||
+      out?.accessToken ||
+      out?.access_token ||
+      out?.data?.token ||
+      out?.data?.accessToken ||
+      out?.data?.access_token;
+
+    if (t) setToken(String(t));
+
+    const u = out?.user || out?.data?.user;
+    if (u) {
+      setUser(u);
+      if (u.role) setRole(u.role);
     }
+
     return out;
   },
-
-  logoutLocal: () => {
-    clearAuthLocal();
-    redirectToLogin();
-  },
-};
 
