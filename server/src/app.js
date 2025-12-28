@@ -36,7 +36,7 @@ function makeRequestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-// ✅ whitelist + patterns (Vercel previews + ngrok)
+// ✅ whitelist + patterns (Vercel previews + localhost + ngrok)
 function isAllowedByPattern(origin) {
   try {
     const u = new URL(origin);
@@ -80,7 +80,6 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   // =====================================================
   // CORS (TOKEN-ONLY)
-  // - NO cookies => credentials MUST be false
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
@@ -111,10 +110,12 @@ export function createApp({ corsOrigins = [] } = {}) {
       return cb(null, origin); // echo exact origin
     },
 
-    // ✅ TOKEN-ONLY
+    // ✅ TOKEN ONLY (no cookies from browser)
     credentials: false,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+
+    // ✅ IMPORTANT: include ALL headers browser may preflight
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -122,23 +123,24 @@ export function createApp({ corsOrigins = [] } = {}) {
       "x-request-id",
       "Accept",
       "Origin",
+
+      // ✅ THIS FIXES YOUR ERROR:
+      "ngrok-skip-browser-warning",
     ],
+
     exposedHeaders: ["x-request-id"],
     maxAge: 86400,
     optionsSuccessStatus: 204,
   };
 
+  // ✅ Apply CORS
   app.use(cors(corsOptions));
 
-  // ✅ handle preflight everywhere
-  app.use((req, res, next) => {
-    if (req.method === "OPTIONS") return res.sendStatus(204);
-    next();
-  });
+  // ✅ Properly handle OPTIONS everywhere (preflight)
+  app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES
-  // (može ostati, ali FE NE SME slati cookies kad smo token-only)
+  // COOKIES (ok to keep, FE must not use cookies)
   // =====================================================
   app.use(cookieParser());
 
