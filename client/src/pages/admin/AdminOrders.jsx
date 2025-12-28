@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../../api.js";
+import { api } from "../../lib/api.js";
 
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");

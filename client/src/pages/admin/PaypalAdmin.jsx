@@ -1,6 +1,6 @@
 // client/src/pages/admin/PayPalAdmin.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { api } from "../../api.js";
+import { api } from "../../lib/api.js";
 
 function minutesAgo(dateStr) {
   try {
