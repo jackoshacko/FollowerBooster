@@ -1,511 +1,683 @@
-// client/src/components/Topbar.jsx
+// client/src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  ListChecks,
+  Wallet,
+  Wrench,
+  Shield,
+  LogOut,
+  Users,
+  Receipt,
+  BarChart3,
+  ChevronsLeft,
+  ChevronsRight,
+  Sparkles,
+  Bell,
+  Settings,
+  BadgeCheck,
+  AlertCircle,
+  Clock,
+  ArrowUpRight,
+} from "lucide-react";
+
 import { api, setToken, setUser } from "../lib/api.js";
-import { Menu, X, LogOut, Search, Plus, Wallet, Shield } from "lucide-react";
-import Sidebar from "./Sidebar.jsx";
 
-function cn(...a) {
-  return a.filter(Boolean).join(" ");
+function cls(...xs) {
+  return xs.filter(Boolean).join(" ");
 }
 
-function routeLabel(pathname) {
-  if (pathname.startsWith("/dashboard")) return "Dashboard";
-  if (pathname.startsWith("/services")) return "Services";
-  if (pathname.startsWith("/create-order")) return "Create order";
-  if (pathname.startsWith("/orders")) return "Orders";
-  if (pathname.startsWith("/wallet")) return "Wallet";
-  if (pathname.startsWith("/admin")) return "Admin";
-  return "App";
+function RenderIcon({ icon, className }) {
+  if (!icon) return null;
+  if (React.isValidElement(icon)) return icon;
+  const IconComp = icon;
+  return <IconComp className={className || "h-4 w-4"} />;
 }
 
-function initialsFromMe(me) {
-  const s = String(me?.email || me?.username || me?.name || "U").trim();
-  const p = s.split(/[\s@._-]+/).filter(Boolean);
-  const a = (p[0]?.[0] || "U").toUpperCase();
-  const b = (p[1]?.[0] || "").toUpperCase();
-  return (a + b).slice(0, 2);
-}
+function Badge({ children, tone = "zinc", title }) {
+  const toneCls =
+    tone === "red"
+      ? "border-red-500/30 bg-red-500/10 text-red-100"
+      : tone === "amber"
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+      : tone === "blue"
+      ? "border-blue-500/30 bg-blue-500/10 text-blue-100"
+      : tone === "green"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+      : "border-white/10 bg-white/5 text-zinc-100";
 
-function RolePill({ role }) {
-  const isAdmin = String(role || "").toLowerCase() === "admin";
   return (
     <span
-      className={cn(
-        "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+      title={title}
+      className={cls(
+        "ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
         "backdrop-blur-xl",
-        isAdmin
-          ? "border-sky-500/25 bg-sky-500/10 text-sky-100"
-          : "border-white/10 bg-white/5 text-zinc-200/70"
+        toneCls
       )}
     >
-      {isAdmin ? "ADMIN" : "CUSTOMER"}
+      {children}
     </span>
   );
 }
 
-export default function Topbar() {
-  const nav = useNavigate();
+function Chip({ children, tone = "neutral", title }) {
+  const tones = {
+    neutral: "border-white/10 bg-white/5 text-zinc-100/85",
+    ok: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100",
+    warn: "border-amber-500/25 bg-amber-500/10 text-amber-100",
+    bad: "border-red-500/25 bg-red-500/10 text-red-100",
+    info: "border-sky-500/25 bg-sky-500/10 text-sky-100",
+    violet: "border-violet-500/25 bg-violet-500/10 text-violet-100",
+  };
+
+  return (
+    <span
+      title={title}
+      className={cls(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+        "backdrop-blur-xl",
+        tones[tone] || tones.neutral
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Item({ to, icon, label, collapsed, right, onClick }) {
+  return (
+    <NavLink
+      to={to}
+      end
+      title={collapsed ? label : undefined}
+      onClick={onClick}
+      className={({ isActive }) =>
+        cls(
+          "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition",
+          "border overflow-hidden select-none",
+          isActive
+            ? cls(
+                "border-white/12 bg-white/10 text-white",
+                "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_55px_rgba(168,85,247,0.26)]"
+              )
+            : cls(
+                "border-transparent text-zinc-200/80",
+                "hover:text-white hover:border-white/10 hover:bg-white/6"
+              )
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          <span
+            className={cls(
+              "pointer-events-none absolute left-0 top-1/2 h-9 w-[4px] -translate-y-1/2 rounded-full",
+              "bg-gradient-to-b from-cyan-300/0 via-purple-300/70 to-cyan-300/0",
+              "shadow-[0_0_16px_rgba(168,85,247,0.45)]",
+              isActive ? "opacity-100" : "opacity-0"
+            )}
+          />
+
+          <span
+            className={cls(
+              "pointer-events-none absolute inset-0",
+              "bg-[radial-gradient(1200px_180px_at_10%_0%,rgba(255,255,255,0.10),transparent_60%)]",
+              "transition",
+              isActive ? "opacity-100" : "opacity-0"
+            )}
+          />
+
+          <span
+            className={cls(
+              "grid h-9 w-9 place-items-center rounded-2xl border shrink-0 transition",
+              "backdrop-blur-xl",
+              isActive
+                ? "border-white/14 bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_10px_35px_rgba(168,85,247,0.20)]"
+                : "border-white/10 bg-white/5 group-hover:bg-white/10"
+            )}
+          >
+            <RenderIcon icon={icon} className="h-4 w-4 text-white/90" />
+          </span>
+
+          {!collapsed ? <span className="font-semibold tracking-tight">{label}</span> : null}
+          {!collapsed && right ? right : null}
+
+          <span
+            className={cls(
+              "pointer-events-none absolute -inset-10 opacity-0 transition",
+              "bg-gradient-to-r from-white/0 via-white/10 to-white/0",
+              "rotate-12",
+              "group-hover:opacity-100"
+            )}
+          />
+        </>
+      )}
+    </NavLink>
+  );
+}
+
+function Section({ title, icon, collapsed, children }) {
+  return (
+    <div className="mt-5">
+      {!collapsed ? (
+        <div className="mb-2 flex items-center gap-2 px-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80 backdrop-blur-xl">
+            {icon ? <RenderIcon icon={icon} className="h-3.5 w-3.5" /> : null}
+            <span>{title}</span>
+          </span>
+        </div>
+      ) : (
+        <div className="mb-2 px-2">
+          <div className="h-px w-full bg-white/10" />
+        </div>
+      )}
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function SidebarShell({
+  children,
+  collapsed,
+  setCollapsed,
+  onLogout,
+  loading,
+  title,
+  subtitle,
+  statusPills,
+  footer,
+  mobile,
+}) {
+  return (
+    <aside
+      className={cls(
+        "relative p-4",
+        mobile ? "h-[100dvh]" : "h-screen",
+        "border-r border-white/10 bg-black/35 backdrop-blur-xl",
+        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+        collapsed ? "w-[98px]" : "w-[310px]"
+      )}
+    >
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
+        <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
+        <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
+      </div>
+
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0 backdrop-blur-xl">
+            <span className="text-xs font-black tracking-tight text-white">FB</span>
+          </div>
+
+          {!collapsed ? (
+            <div className="leading-tight min-w-0">
+              <div className="text-sm font-extrabold tracking-tight text-white truncate">
+                {title || "FollowerBooster"}
+              </div>
+              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!mobile ? (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              className={cls(
+                "inline-flex items-center justify-center rounded-2xl p-2",
+                "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
+                "hover:bg-white/10 hover:text-white transition",
+                "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+              )}
+              title={collapsed ? "Expand" : "Collapse"}
+            >
+              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+            </button>
+          ) : null}
+
+          <button
+            onClick={onLogout}
+            className={cls(
+              "inline-flex items-center justify-center rounded-2xl p-2",
+              "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
+              "hover:bg-white/10 hover:text-white transition"
+            )}
+            title="Logout"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && statusPills ? <div className="mb-3 flex flex-wrap gap-2">{statusPills}</div> : null}
+
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+
+      <div className="mt-3 flex flex-col min-h-0">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
+          {children}
+        </div>
+        {footer ? <div className="mt-3">{footer}</div> : null}
+      </div>
+    </aside>
+  );
+}
+
+function fmtMoney(n, cur = "EUR") {
+  const v = Number(n || 0);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: cur,
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    // ✅ OVO TI JE PUKLO U JEDNOJ LINIJI: falili backticks
+    return `${Math.round(v * 100) / 100} ${cur}`;
+  }
+}
+
+export default function Sidebar({ mobile = false, onClose }) {
+  const navigate = useNavigate();
   const loc = useLocation();
-  const label = routeLabel(loc.pathname);
 
-  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sb_collapsed") === "1");
 
-  // session
   const [me, setMe] = useState(null);
-  const isAdmin = String(me?.role || "").toLowerCase() === "admin";
+  const [adminStats, setAdminStats] = useState(null);
+  const [myOrdersCount, setMyOrdersCount] = useState(null);
 
-  // quick search
-  const [q, setQ] = useState("");
-  const [focusSearch, setFocusSearch] = useState(false);
+  const [walletSnap, setWalletSnap] = useState({ balance: null, currency: "EUR" });
+  const [opsSnap, setOpsSnap] = useState({ active: null, pending: null, processing: null, failed: null });
 
-  const drawerRef = useRef(null);
-  const lastBody = useRef({ overflow: "", position: "", top: "", width: "" });
-  const scrollYRef = useRef(0);
+  const [loading, setLoading] = useState(true);
+  const [live, setLive] = useState(true);
+  const pollRef = useRef(null);
 
-  function hardLogout({ redirect = true } = {}) {
+  const isAdmin = me?.role === "admin";
+  const isOnAdmin = loc.pathname.startsWith("/admin");
+
+  useEffect(() => {
+    localStorage.setItem("sb_collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
+
+  function hardLogout() {
     setToken("");
     setUser(null);
     localStorage.removeItem("role");
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    window.dispatchEvent(new Event("auth-changed"));
-    if (redirect) nav("/login", { replace: true });
+    if (typeof onClose === "function") onClose();
+    navigate("/login", { replace: true });
   }
 
-  function logout() {
-    hardLogout({ redirect: true });
-  }
+  const navClick = () => {
+    if (mobile && typeof onClose === "function") onClose();
+  };
 
-  // close drawer on route change
-  useEffect(() => {
-    setOpen(false);
-  }, [loc.pathname]);
-
-  // ✅ iOS-safe body lock (prevents bounce + weird “must tap to scroll”)
-  useEffect(() => {
-    if (!open) return;
-
-    const body = document.body;
-    const html = document.documentElement;
-
-    scrollYRef.current = window.scrollY || window.pageYOffset || 0;
-
-    lastBody.current = {
-      overflow: body.style.overflow,
-      position: body.style.position,
-      top: body.style.top,
-      width: body.style.width,
-    };
-
-    // lock
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollYRef.current}px`;
-    body.style.width = "100%";
-
-    // reduce iOS rubber band on the overlay
-    html.style.overscrollBehavior = "none";
-
-    return () => {
-      // unlock
-      body.style.overflow = lastBody.current.overflow || "";
-      body.style.position = lastBody.current.position || "";
-      body.style.top = lastBody.current.top || "";
-      body.style.width = lastBody.current.width || "";
-
-      html.style.overscrollBehavior = "";
-
-      // restore scroll
-      window.scrollTo(0, scrollYRef.current || 0);
-    };
-  }, [open]);
-
-  // ✅ load ME once (token-only)
+  // ✅ Load /api/me (token-only)
   useEffect(() => {
     let alive = true;
-
     (async () => {
+      setLoading(true);
       try {
         const token = localStorage.getItem("token");
         if (!token) throw new Error("no token");
 
         const data = await api.get("/api/me");
-
         if (!alive) return;
-        setMe(data || null);
-        if (data?.role) localStorage.setItem("role", data.role);
+
+        setMe(data);
+        localStorage.setItem("role", data?.role || "");
       } catch {
         if (!alive) return;
         setMe(null);
-        if (loc.pathname !== "/login" && loc.pathname !== "/register") {
-          hardLogout({ redirect: true });
-        }
+        hardLogout();
+      } finally {
+        if (!alive) return;
+        setLoading(false);
       }
     })();
-
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // refresh "me" when auth changes
-  useEffect(() => {
-    let alive = true;
+  async function loadSidebarMetrics({ silent = false } = {}) {
+    try {
+      const [orders, wallet] = await Promise.allSettled([api.get("/orders"), api.get("/wallet")]);
 
-    const onAuthChanged = async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) throw new Error("no token");
-        const data = await api.get("/api/me");
-        if (!alive) return;
-        setMe(data || null);
-        if (data?.role) localStorage.setItem("role", data.role);
-      } catch {
-        if (!alive) return;
-        setMe(null);
+      if (orders.status === "fulfilled") {
+        const list = Array.isArray(orders.value) ? orders.value : [];
+        setMyOrdersCount(list.length);
+
+        let pending = 0;
+        let processing = 0;
+        let failed = 0;
+
+        for (const o of list) {
+          const st = String(o?.status || "").toLowerCase();
+          if (st === "pending") pending++;
+          else if (st === "processing") processing++;
+          else if (st === "failed") failed++;
+        }
+        const active = pending + processing;
+        setOpsSnap({ active, pending, processing, failed });
+      } else if (!silent) {
+        setMyOrdersCount(null);
       }
-    };
 
-    window.addEventListener("auth-changed", onAuthChanged);
-    return () => {
-      alive = false;
-      window.removeEventListener("auth-changed", onAuthChanged);
-    };
-  }, []);
-
-  // keyboard shortcuts: ESC closes, Ctrl/Cmd+K focuses search
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === "Escape") setOpen(false);
-
-      const isK = e.key?.toLowerCase?.() === "k";
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && isK) {
-        e.preventDefault();
-        setFocusSearch(true);
+      if (wallet.status === "fulfilled") {
+        const w = wallet.value || {};
+        setWalletSnap({
+          balance: typeof w?.balance === "number" ? w.balance : Number(w?.balance ?? 0),
+          currency: w?.currency || "EUR",
+        });
+      } else if (!silent) {
+        setWalletSnap({ balance: null, currency: "EUR" });
+      }
+    } catch {
+      if (!silent) {
+        setMyOrdersCount(null);
+        setWalletSnap({ balance: null, currency: "EUR" });
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  // focus handling
-  useEffect(() => {
-    if (!focusSearch) return;
-    const el = document.getElementById("topbar-search");
-    if (el) el.focus();
-    setFocusSearch(false);
-  }, [focusSearch]);
-
-  // ✅ trap horizontal drift on iOS: if user “pulls” sideways, snap back
-  useEffect(() => {
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const x = window.scrollX || 0;
-        if (x !== 0) window.scrollTo(0, window.scrollY || 0);
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, []);
-
-  const userLabel = useMemo(() => me?.email || me?.username || me?.name || "User", [me]);
-  const initials = useMemo(() => initialsFromMe(me), [me]);
-
-  function onSubmitSearch(e) {
-    e.preventDefault();
-    const s = q.trim().toLowerCase();
-    if (!s) return;
-
-    if (s.startsWith("wal")) return nav("/wallet");
-    if (s.startsWith("ord")) return nav("/orders");
-    if (s.startsWith("ser")) return nav("/services");
-    if (s.startsWith("cre") || s.startsWith("buy")) return nav("/create-order");
-    if (s.startsWith("dash")) return nav("/dashboard");
-    if (s.startsWith("adm") && isAdmin) return nav("/admin/dashboard");
   }
 
-  return (
+  async function loadAdminStats({ silent = false } = {}) {
+    if (!isAdmin) return;
+    try {
+      const s = await api.get("/admin/stats");
+      setAdminStats(s);
+    } catch {
+      if (!silent) setAdminStats(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!me) return;
+    let alive = true;
+    (async () => {
+      await loadSidebarMetrics();
+      await loadAdminStats();
+      if (!alive) return;
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.role]);
+
+  useEffect(() => {
+    if (!me) return;
+    if (!live) return;
+
+    const ms = isOnAdmin ? 15000 : 22000;
+
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(() => {
+      loadSidebarMetrics({ silent: true });
+      loadAdminStats({ silent: true });
+    }, ms);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+  }, [me, live, isOnAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const emailLabel = useMemo(() => {
+    const email = me?.email || me?.username || me?.name;
+    return email || "Authenticated";
+  }, [me]);
+
+  const roleLabel = useMemo(() => {
+    const r = String(me?.role || "customer").toUpperCase();
+    return r === "ADMIN" ? "ADMIN" : "CUSTOMER";
+  }, [me]);
+
+  const pendingOrders = Number(adminStats?.ordersActive ?? adminStats?.pendingOrders ?? 0);
+  const revenue30d = adminStats?.revenue30d ?? adminStats?.revenue ?? null;
+
+  const walletTone = walletSnap.balance == null ? "neutral" : walletSnap.balance > 0 ? "ok" : "warn";
+  const riskTone =
+    (opsSnap.failed || 0) > 0 ? "bad" : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? "warn" : "ok";
+
+  const statusPills = (
     <>
-      {/* NOTE: overflow-x hidden + safe-area padding; also no “pt” inside header height to avoid jump */}
-      <header className="sticky top-0 z-30 w-full overflow-x-hidden">
-        <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-          <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
+      <Chip tone="violet" title="Premium UI mode">
+        <Sparkles className="h-3.5 w-3.5" /> 2050
+      </Chip>
 
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="glow-orb absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
-            <div className="glow-orb2 absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
-            <div className="absolute inset-0 bg-[radial-gradient(900px_120px_at_20%_0%,rgba(255,255,255,0.10),transparent_65%)]" />
+      <Chip tone={walletTone} title="Wallet balance snapshot">
+        <Wallet className="h-3.5 w-3.5" />{" "}
+        {walletSnap.balance == null ? "Wallet —" : fmtMoney(walletSnap.balance, walletSnap.currency)}
+      </Chip>
+
+      <Chip tone={riskTone} title="Orders health (approx)">
+        {(opsSnap.failed || 0) > 0 ? (
+          <AlertCircle className="h-3.5 w-3.5" />
+        ) : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? (
+          <Clock className="h-3.5 w-3.5" />
+        ) : (
+          <BadgeCheck className="h-3.5 w-3.5" />
+        )}
+        {riskTone === "ok" ? "Clean" : riskTone === "warn" ? "Active" : "Issues"}
+      </Chip>
+
+      <button
+        type="button"
+        onClick={() => setLive((v) => !v)}
+        className={cls(
+          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+          "backdrop-blur-xl transition",
+          live
+            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
+            : "border-white/10 bg-white/5 text-zinc-100/70 hover:bg-white/10"
+        )}
+        title="Toggle live polling"
+      >
+        <Bell className="h-3.5 w-3.5" /> {live ? "Live" : "Paused"}
+      </button>
+    </>
+  );
+
+  const footer = !collapsed ? (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="font-semibold text-zinc-100 truncate">FollowerBooster</div>
+            <Chip tone={roleLabel === "ADMIN" ? "info" : "neutral"}>{roleLabel}</Chip>
           </div>
-
-          {/* SAFE-AREA padding wrapper */}
-          <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
-            {/* MAIN BAR */}
-            <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
-              {/* LEFT */}
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  onClick={() => setOpen(true)}
-                  className={cn(
-                    "md:hidden inline-flex items-center justify-center rounded-2xl p-2",
-                    "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
-                    "hover:bg-white/10 transition active:scale-[0.98]"
-                  )}
-                  title="Menu"
-                >
-                  <Menu className="h-5 w-5" />
-                </button>
-
-                <button
-                  onClick={() => nav("/dashboard")}
-                  className="flex items-center gap-3 min-w-0"
-                  title="Go to Dashboard"
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
-                    <span className="text-xs font-black tracking-tight text-white">FB</span>
-                  </div>
-
-                  <div className="leading-tight min-w-0">
-                    <div className="text-sm font-extrabold tracking-tight text-white truncate">
-                      FollowerBooster
-                    </div>
-                    <div className="text-[11px] text-zinc-300/70 truncate">
-                      Premium panel • wallet-ready
-                    </div>
-                  </div>
-                </button>
-
-                <div className="hidden sm:block h-9 w-px bg-white/10 shrink-0" />
-
-                <div className="hidden sm:flex items-center gap-2 shrink-0">
-                  <span
-                    className={cn(
-                      "rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-100",
-                      "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
-                    )}
-                  >
-                    {label}
-                  </span>
-
-                  {isAdmin ? (
-                    <span
-                      className={cn(
-                        "rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-100",
-                        "shadow-[0_0_0_1px_rgba(14,165,233,0.10)]"
-                      )}
-                      title="Admin mode"
-                    >
-                      <Shield className="inline-block h-3.5 w-3.5 -mt-[1px] mr-1" />
-                      Admin
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              {/* CENTER (desktop search only) */}
-              <div className="hidden lg:block w-[520px] max-w-[38vw]">
-                <form onSubmit={onSubmitSearch} className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                  <input
-                    id="topbar-search"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search… (Ctrl/⌘ K)   e.g. wallet, orders, services"
-                    className={cn(
-                      "w-full rounded-2xl border border-white/10 bg-white/5 px-10 py-2 text-sm text-zinc-100",
-                      "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
-                      "focus:border-white/18 focus:bg-white/7"
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      "absolute right-3 top-1/2 -translate-y-1/2",
-                      "rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-zinc-200/55"
-                    )}
-                  >
-                    ⌘K
-                  </span>
-                </form>
-              </div>
-
-              {/* RIGHT */}
-              <div className="flex items-center gap-2 md:gap-3 shrink-0">
-                {/* desktop actions */}
-                <div className="hidden md:flex items-center gap-2">
-                  <button
-                    onClick={() => nav("/wallet")}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
-                      "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
-                      "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.18)]",
-                      "active:scale-[0.99] transition"
-                    )}
-                    title="Wallet"
-                  >
-                    <Wallet className="h-4 w-4" />
-                    Wallet
-                  </button>
-
-                  <button
-                    onClick={() => nav("/create-order")}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
-                      "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
-                      "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(34,211,238,0.16)]",
-                      "active:scale-[0.99] transition"
-                    )}
-                    title="Create order"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Create
-                  </button>
-                </div>
-
-                {/* user pill */}
-                <div
-                  className={cn(
-                    "flex items-center gap-2 rounded-2xl border border-white/10",
-                    "bg-white/5 px-3 py-2 backdrop-blur-xl",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_70px_rgba(168,85,247,0.10)]"
-                  )}
-                  title={userLabel}
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 text-xs font-black text-white">
-                    {initials}
-                  </div>
-
-                  <div className="hidden md:block leading-tight max-w-[180px]">
-                    <div className="text-xs font-semibold text-zinc-100 truncate">{userLabel}</div>
-                    <div className="mt-0.5">
-                      <RolePill role={me?.role} />
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={logout}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-2xl px-3 md:px-4 py-2 text-sm font-semibold text-white",
-                    "border border-white/10 bg-white/5 hover:bg-white/10",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.25)]",
-                    "active:scale-[0.99] transition"
-                  )}
-                  title="Logout"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span className="hidden sm:inline">Logout</span>
-                </button>
-              </div>
-            </div>
-
-            {/* MOBILE ACTION ROW (solves: “moram gore da vidim top bar”, plus no horizontal drift) */}
-            <div className="lg:hidden pb-3">
-              <div
-                className={cn(
-                  "flex items-center gap-2",
-                  "rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl",
-                  "px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_70px_rgba(168,85,247,0.10)]"
-                )}
-              >
-                <button
-                  onClick={() => nav("/wallet")}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
-                    "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
-                    "active:scale-[0.99] transition"
-                  )}
-                >
-                  <Wallet className="h-4 w-4" />
-                  Wallet
-                </button>
-
-                <button
-                  onClick={() => nav("/create-order")}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
-                    "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
-                    "active:scale-[0.99] transition"
-                  )}
-                >
-                  <Plus className="h-4 w-4" />
-                  Create
-                </button>
-
-                <form onSubmit={onSubmitSearch} className="relative flex-1 min-w-0">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search… (wallet, orders, services)"
-                    className={cn(
-                      "w-full rounded-2xl border border-white/10 bg-white/5 px-10 py-2 text-sm text-zinc-100",
-                      "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
-                      "focus:border-white/18 focus:bg-white/7"
-                    )}
-                  />
-                </form>
-              </div>
-            </div>
+          <div className="mt-1 text-[11px] text-zinc-200/60 truncate">
+            {me?.email || "Authenticated • Wallet-ready • Premium UI"}
           </div>
         </div>
-      </header>
 
-      {/* MOBILE DRAWER */}
-      {open ? (
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          style={{
-            // helps iOS viewport jitter
-            WebkitTransform: "translateZ(0)",
-            transform: "translateZ(0)",
-          }}
+        <button
+          onClick={() => navigate("/wallet")}
+          className={cls(
+            "inline-flex items-center gap-1 rounded-2xl px-3 py-2 text-[11px] font-semibold",
+            "border border-white/10 bg-white/5 hover:bg-white/10 transition"
+          )}
+          title="Go to Wallet"
         >
-          {/* overlay */}
-          <div
-            className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
-            onClick={() => setOpen(false)}
-          />
+          <ArrowUpRight className="h-4 w-4" /> Wallet
+        </button>
+      </div>
 
-          {/* panel */}
-          <div
-            ref={drawerRef}
-            className={cn(
-              "absolute left-0 top-0 h-full w-[88%] max-w-[380px]",
-              "overscroll-contain"
-            )}
-            style={{
-              paddingTop: "env(safe-area-inset-top)",
-              paddingBottom: "env(safe-area-inset-bottom)",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            <div className="absolute right-3 top-3 z-50">
-              <button
-                onClick={() => setOpen(false)}
-                className={cn(
-                  "inline-flex items-center justify-center rounded-2xl p-2",
-                  "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
-                  "hover:bg-white/10 transition active:scale-[0.98]"
-                )}
-                title="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={() => navigate("/create-order")}
+          className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
+        >
+          Create order
+        </button>
+        <button
+          onClick={() => navigate("/services")}
+          className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+        >
+          Services
+        </button>
+      </div>
 
-            <Sidebar mobile onClose={() => setOpen(false)} />
+      {isAdmin ? (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] text-zinc-200/70">Admin (30d)</div>
+            <Chip tone="neutral">
+              <BarChart3 className="h-3.5 w-3.5" />{" "}
+              {revenue30d != null ? `${Number(revenue30d).toFixed?.(2) ?? revenue30d} EUR` : "—"}
+            </Chip>
           </div>
         </div>
       ) : null}
+    </div>
+  ) : (
+    <div className="mt-3 flex justify-center">
+      <div className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl" />
+    </div>
+  );
+
+  const content = (
+    <>
+      {typeof onClose === "function" && mobile ? (
+        <button
+          onClick={onClose}
+          className="mb-3 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100/85 hover:bg-white/10"
+        >
+          Close
+        </button>
+      ) : null}
+
+      <Section title="User" icon={Shield} collapsed={collapsed}>
+        <Item to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={navClick} />
+        <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={navClick} />
+        <Item to="/create-order" icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={navClick} />
+
+        <Item
+          to="/orders"
+          icon={ListChecks}
+          label="Orders"
+          collapsed={collapsed}
+          onClick={navClick}
+          right={
+            myOrdersCount !== null ? (
+              <Badge
+                title="Your orders"
+                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
+              >
+                {myOrdersCount}
+              </Badge>
+            ) : null
+          }
+        />
+
+        <Item
+          to="/wallet"
+          icon={Wallet}
+          label="Wallet"
+          collapsed={collapsed}
+          onClick={navClick}
+          right={
+            !collapsed && walletSnap.balance != null ? (
+              <Badge title="Balance" tone={walletSnap.balance > 0 ? "green" : "amber"}>
+                {fmtMoney(walletSnap.balance, walletSnap.currency)}
+              </Badge>
+            ) : null
+          }
+        />
+      </Section>
+
+      <Section title="Account" icon={Settings} collapsed={collapsed}>
+        <div
+          className={cls(
+            "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
+            collapsed ? "hidden" : ""
+          )}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
+              <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
+            </div>
+            <button
+              onClick={hardLogout}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+              title="Logout"
+            >
+              <LogOut className="h-4 w-4" /> Logout
+            </button>
+          </div>
+        </div>
+      </Section>
+
+      {isAdmin ? (
+        <Section title="Admin" icon={Wrench} collapsed={collapsed}>
+          <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={navClick} />
+
+          <Item
+            to="/admin/orders"
+            icon={ListChecks}
+            label="Orders"
+            collapsed={collapsed}
+            onClick={navClick}
+            right={
+              Number.isFinite(pendingOrders) && pendingOrders > 0 ? (
+                <Badge tone="amber" title="Pending/Processing orders">
+                  {pendingOrders}
+                </Badge>
+              ) : (
+                <Badge title="Pending/Processing orders">0</Badge>
+              )
+            }
+          />
+
+          <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={navClick} />
+        </Section>
+      ) : null}
     </>
   );
+
+  if (!mobile) {
+    return (
+      <div className="sticky top-0 hidden md:block">
+        <SidebarShell
+          mobile={false}
+          collapsed={collapsed}
+          setCollapsed={setCollapsed}
+          onLogout={hardLogout}
+          loading={loading}
+          title="FollowerBooster"
+          subtitle={emailLabel}
+          statusPills={statusPills}
+          footer={footer}
+        >
+          {content}
+        </SidebarShell>
+      </div>
+    );
+  }
+
+  return (
+    <SidebarShell
+      mobile
+      collapsed={false}
+      setCollapsed={() => {}}
+      onLogout={hardLogout}
+      loading={loading}
+      title="FollowerBooster"
+      subtitle={emailLabel}
+      statusPills={statusPills}
+      footer={footer}
+    >
+      {content}
+    </SidebarShell>
+  );
 }
+
