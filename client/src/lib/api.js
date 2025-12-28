@@ -4,7 +4,6 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* ================= URL HELPERS ================= */
 export function apiUrl(path = "") {
-  // path mora počinjati sa "/"
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${API}${p}`;
 }
@@ -52,12 +51,9 @@ function redirectToLogin() {
 }
 
 /* ================= CORE PARSERS ================= */
-
-// Vrati { json, text, contentType }
 async function readResponse(res) {
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
 
-  // prvo probaj text (radi i za json i za html)
   let text = "";
   try {
     text = await res.text();
@@ -65,7 +61,6 @@ async function readResponse(res) {
     text = "";
   }
 
-  // ako je json, probaj parse
   let json = null;
   if (text) {
     if (contentType.includes("application/json")) {
@@ -75,7 +70,6 @@ async function readResponse(res) {
         json = null;
       }
     } else {
-      // nekad backend vrati json bez content-type; probaj heuristiku
       const t = text.trim();
       if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
         try {
@@ -97,11 +91,23 @@ function pickErrorMessage(json, textFallback = "", statusFallback = "Request fai
 function looksLikeNgrokHtml(text) {
   if (!text) return false;
   const t = text.toLowerCase();
-  // ngrok error/warning pages su HTML + imaju "ngrok"
   return t.includes("<html") && t.includes("ngrok");
 }
 
-/* ================= CORE REQUEST (HARD TOKEN-ONLY) ================= */
+/* ================= ENV / NGROK HELPERS ================= */
+const IS_VERCEL = typeof window !== "undefined" && String(window.location.hostname).includes("vercel.app");
+const IS_LOCAL_API =
+  API.includes("localhost") || API.includes("127.0.0.1") || API.includes("0.0.0.0");
+
+// ✅ Only add ngrok header in LOCAL dev (optional). NEVER on Vercel/production browser.
+function shouldSendNgrokSkipHeader() {
+  // If you really want it locally when calling an ngrok URL from localhost:
+  // - allow when NOT on vercel AND api looks like ngrok
+  const apiLooksNgrok = API.includes("ngrok-free.dev") || API.includes("ngrok.io");
+  return !IS_VERCEL && apiLooksNgrok && IS_LOCAL_API; // safest
+}
+
+/* ================= CORE REQUEST (TOKEN-ONLY) ================= */
 export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
@@ -111,7 +117,6 @@ export async function request(path, options = {}) {
 
   const hasBody = body !== undefined && body !== null;
 
-  // ako je body plain object -> JSON.stringify
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
   const isString = typeof body === "string";
@@ -125,12 +130,15 @@ export async function request(path, options = {}) {
 
   const headers = {
     Accept: "application/json",
-    // ngrok: preskoči warning page (ne smeta ni kad nije ngrok)
-    "ngrok-skip-browser-warning": "true",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(hasBody && !(isForm || isBlob) && !isString ? { "Content-Type": "application/json" } : {}),
     ...(extraHeaders || {}),
   };
+
+  // ❌ DO NOT SEND THIS HEADER IN PRODUCTION BROWSER (causes CORS preflight fail)
+  if (shouldSendNgrokSkipHeader()) {
+    headers["ngrok-skip-browser-warning"] = "true";
+  }
 
   const res = await fetch(apiUrl(path), {
     ...rest,
@@ -143,15 +151,13 @@ export async function request(path, options = {}) {
 
   const { json, text, contentType } = await readResponse(res);
 
-  // Ako ngrok vrati HTML (warning/error page), objasni lepo
   if (looksLikeNgrokHtml(text)) {
     throw new Error(
-      `NGROK returned HTML instead of API response. Check that ngrok is running and forwarding to localhost:5000, and that VITE_API_URL is correct.\n` +
+      `NGROK returned HTML instead of API response. Check ngrok forwarding + VITE_API_URL.\n` +
         `URL: ${apiUrl(path)}`
     );
   }
 
-  // 401 -> očisti auth i baci error
   if (res.status === 401) {
     clearAuthLocal();
     redirectToLogin();
@@ -164,18 +170,14 @@ export async function request(path, options = {}) {
     throw new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
   }
 
-  // Ako backend vrati text (npr. "ok") a ne json
   if (json !== null) return json;
   if (text) return { text };
-
   return null;
 }
 
 /* ================= API WRAPPER ================= */
 export const api = {
   get: (p) => request(p),
-
-  // možeš slati objekat direktno (ne mora JSON.stringify)
   post: (p, b) => request(p, { method: "POST", body: b }),
   put: (p, b) => request(p, { method: "PUT", body: b }),
   patch: (p, b) => request(p, { method: "PATCH", body: b }),
@@ -183,7 +185,6 @@ export const api = {
 
   me: () => request("/api/me"),
 
-  // login/register: očekujem { token, user } ali radi i ako vrati samo token
   login: async (payload) => {
     const out = await request("/auth/login", { method: "POST", body: payload });
     if (out?.token) setToken(out.token);
