@@ -1,5 +1,5 @@
 // client/src/components/Topbar.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, setToken, setUser } from "../lib/api.js";
 import { Menu, X, LogOut, Search, Plus, Wallet, Shield } from "lucide-react";
@@ -59,16 +59,17 @@ export default function Topbar() {
   const [q, setQ] = useState("");
   const [focusSearch, setFocusSearch] = useState(false);
 
+  const drawerRef = useRef(null);
+  const lastBody = useRef({ overflow: "", position: "", top: "", width: "" });
+  const scrollYRef = useRef(0);
+
   function hardLogout({ redirect = true } = {}) {
     setToken("");
     setUser(null);
     localStorage.removeItem("role");
     localStorage.removeItem("token");
     localStorage.removeItem("user");
-
-    // notify app listeners (RequireAuth, etc.)
     window.dispatchEvent(new Event("auth-changed"));
-
     if (redirect) nav("/login", { replace: true });
   }
 
@@ -81,13 +82,42 @@ export default function Topbar() {
     setOpen(false);
   }, [loc.pathname]);
 
-  // body scroll lock when drawer open (mobile UX)
+  // ✅ iOS-safe body lock (prevents bounce + weird “must tap to scroll”)
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+
+    const body = document.body;
+    const html = document.documentElement;
+
+    scrollYRef.current = window.scrollY || window.pageYOffset || 0;
+
+    lastBody.current = {
+      overflow: body.style.overflow,
+      position: body.style.position,
+      top: body.style.top,
+      width: body.style.width,
+    };
+
+    // lock
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollYRef.current}px`;
+    body.style.width = "100%";
+
+    // reduce iOS rubber band on the overlay
+    html.style.overscrollBehavior = "none";
+
     return () => {
-      document.body.style.overflow = prev;
+      // unlock
+      body.style.overflow = lastBody.current.overflow || "";
+      body.style.position = lastBody.current.position || "";
+      body.style.top = lastBody.current.top || "";
+      body.style.width = lastBody.current.width || "";
+
+      html.style.overscrollBehavior = "";
+
+      // restore scroll
+      window.scrollTo(0, scrollYRef.current || 0);
     };
   }, [open]);
 
@@ -100,17 +130,14 @@ export default function Topbar() {
         const token = localStorage.getItem("token");
         if (!token) throw new Error("no token");
 
-        // IMPORTANT: token-only endpoint (NOT /auth/me)
         const data = await api.get("/api/me");
 
         if (!alive) return;
         setMe(data || null);
-
         if (data?.role) localStorage.setItem("role", data.role);
-      } catch (e) {
+      } catch {
         if (!alive) return;
         setMe(null);
-        // if session check fails on a protected page -> kick out
         if (loc.pathname !== "/login" && loc.pathname !== "/register") {
           hardLogout({ redirect: true });
         }
@@ -123,7 +150,7 @@ export default function Topbar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // also refresh "me" when auth changes (login/logout from anywhere)
+  // refresh "me" when auth changes
   useEffect(() => {
     let alive = true;
 
@@ -172,10 +199,25 @@ export default function Topbar() {
     setFocusSearch(false);
   }, [focusSearch]);
 
-  const userLabel = useMemo(() => {
-    return me?.email || me?.username || me?.name || "User";
-  }, [me]);
+  // ✅ trap horizontal drift on iOS: if user “pulls” sideways, snap back
+  useEffect(() => {
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const x = window.scrollX || 0;
+        if (x !== 0) window.scrollTo(0, window.scrollY || 0);
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
 
+  const userLabel = useMemo(() => me?.email || me?.username || me?.name || "User", [me]);
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
   function onSubmitSearch(e) {
@@ -193,121 +235,194 @@ export default function Topbar() {
 
   return (
     <>
-      <header className="sticky top-0 z-30">
+      {/* NOTE: overflow-x hidden + safe-area padding; also no “pt” inside header height to avoid jump */}
+      <header className="sticky top-0 z-30 w-full overflow-x-hidden">
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
 
-          <div
-            className={cn(
-              "relative flex h-16 items-center justify-between px-4 md:px-6",
-              "pt-[env(safe-area-inset-top)]"
-            )}
-          >
-            <div className="pointer-events-none absolute inset-0 overflow-hidden">
-              <div className="glow-orb absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
-              <div className="glow-orb2 absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
-              <div className="absolute inset-0 bg-[radial-gradient(900px_120px_at_20%_0%,rgba(255,255,255,0.10),transparent_65%)]" />
-            </div>
+          <div className="pointer-events-none absolute inset-0 overflow-hidden">
+            <div className="glow-orb absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
+            <div className="glow-orb2 absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
+            <div className="absolute inset-0 bg-[radial-gradient(900px_120px_at_20%_0%,rgba(255,255,255,0.10),transparent_65%)]" />
+          </div>
 
-            {/* LEFT */}
-            <div className="relative z-10 flex items-center gap-3 min-w-0">
-              <button
-                onClick={() => setOpen(true)}
-                className={cn(
-                  "md:hidden inline-flex items-center justify-center rounded-2xl p-2",
-                  "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
-                  "hover:bg-white/10 transition active:scale-[0.98]"
-                )}
-                title="Menu"
-              >
-                <Menu className="h-5 w-5" />
-              </button>
-
-              <button
-                onClick={() => nav("/dashboard")}
-                className="flex items-center gap-3 min-w-0"
-                title="Go to Dashboard"
-              >
-                <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
-                  <span className="text-xs font-black tracking-tight text-white">FB</span>
-                </div>
-
-                <div className="leading-tight min-w-0">
-                  <div className="text-sm font-extrabold tracking-tight text-white truncate">
-                    FollowerBooster
-                  </div>
-                  <div className="text-[11px] text-zinc-300/70 truncate">
-                    Premium panel • wallet-ready
-                  </div>
-                </div>
-              </button>
-
-              <div className="hidden sm:block h-9 w-px bg-white/10 shrink-0" />
-
-              <div className="hidden sm:flex items-center gap-2 shrink-0">
-                <span
+          {/* SAFE-AREA padding wrapper */}
+          <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
+            {/* MAIN BAR */}
+            <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
+              {/* LEFT */}
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  onClick={() => setOpen(true)}
                   className={cn(
-                    "rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-100",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+                    "md:hidden inline-flex items-center justify-center rounded-2xl p-2",
+                    "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
+                    "hover:bg-white/10 transition active:scale-[0.98]"
                   )}
+                  title="Menu"
                 >
-                  {label}
-                </span>
+                  <Menu className="h-5 w-5" />
+                </button>
 
-                {isAdmin ? (
+                <button
+                  onClick={() => nav("/dashboard")}
+                  className="flex items-center gap-3 min-w-0"
+                  title="Go to Dashboard"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
+                    <span className="text-xs font-black tracking-tight text-white">FB</span>
+                  </div>
+
+                  <div className="leading-tight min-w-0">
+                    <div className="text-sm font-extrabold tracking-tight text-white truncate">
+                      FollowerBooster
+                    </div>
+                    <div className="text-[11px] text-zinc-300/70 truncate">
+                      Premium panel • wallet-ready
+                    </div>
+                  </div>
+                </button>
+
+                <div className="hidden sm:block h-9 w-px bg-white/10 shrink-0" />
+
+                <div className="hidden sm:flex items-center gap-2 shrink-0">
                   <span
                     className={cn(
-                      "rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-100",
-                      "shadow-[0_0_0_1px_rgba(14,165,233,0.10)]"
+                      "rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-100",
+                      "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
                     )}
-                    title="Admin mode"
                   >
-                    <Shield className="inline-block h-3.5 w-3.5 -mt-[1px] mr-1" />
-                    Admin
+                    {label}
                   </span>
-                ) : null}
+
+                  {isAdmin ? (
+                    <span
+                      className={cn(
+                        "rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[11px] font-semibold text-sky-100",
+                        "shadow-[0_0_0_1px_rgba(14,165,233,0.10)]"
+                      )}
+                      title="Admin mode"
+                    >
+                      <Shield className="inline-block h-3.5 w-3.5 -mt-[1px] mr-1" />
+                      Admin
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* CENTER (desktop search only) */}
+              <div className="hidden lg:block w-[520px] max-w-[38vw]">
+                <form onSubmit={onSubmitSearch} className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
+                  <input
+                    id="topbar-search"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search… (Ctrl/⌘ K)   e.g. wallet, orders, services"
+                    className={cn(
+                      "w-full rounded-2xl border border-white/10 bg-white/5 px-10 py-2 text-sm text-zinc-100",
+                      "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
+                      "focus:border-white/18 focus:bg-white/7"
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      "absolute right-3 top-1/2 -translate-y-1/2",
+                      "rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-zinc-200/55"
+                    )}
+                  >
+                    ⌘K
+                  </span>
+                </form>
+              </div>
+
+              {/* RIGHT */}
+              <div className="flex items-center gap-2 md:gap-3 shrink-0">
+                {/* desktop actions */}
+                <div className="hidden md:flex items-center gap-2">
+                  <button
+                    onClick={() => nav("/wallet")}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
+                      "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
+                      "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.18)]",
+                      "active:scale-[0.99] transition"
+                    )}
+                    title="Wallet"
+                  >
+                    <Wallet className="h-4 w-4" />
+                    Wallet
+                  </button>
+
+                  <button
+                    onClick={() => nav("/create-order")}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
+                      "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
+                      "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(34,211,238,0.16)]",
+                      "active:scale-[0.99] transition"
+                    )}
+                    title="Create order"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Create
+                  </button>
+                </div>
+
+                {/* user pill */}
+                <div
+                  className={cn(
+                    "flex items-center gap-2 rounded-2xl border border-white/10",
+                    "bg-white/5 px-3 py-2 backdrop-blur-xl",
+                    "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_70px_rgba(168,85,247,0.10)]"
+                  )}
+                  title={userLabel}
+                >
+                  <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 text-xs font-black text-white">
+                    {initials}
+                  </div>
+
+                  <div className="hidden md:block leading-tight max-w-[180px]">
+                    <div className="text-xs font-semibold text-zinc-100 truncate">{userLabel}</div>
+                    <div className="mt-0.5">
+                      <RolePill role={me?.role} />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={logout}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-2xl px-3 md:px-4 py-2 text-sm font-semibold text-white",
+                    "border border-white/10 bg-white/5 hover:bg-white/10",
+                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.25)]",
+                    "active:scale-[0.99] transition"
+                  )}
+                  title="Logout"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="hidden sm:inline">Logout</span>
+                </button>
               </div>
             </div>
 
-            {/* CENTER */}
-            <div className="relative z-10 hidden lg:block w-[520px] max-w-[38vw]">
-              <form onSubmit={onSubmitSearch} className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                <input
-                  id="topbar-search"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search… (Ctrl/⌘ K)   e.g. wallet, orders, services"
-                  className={cn(
-                    "w-full rounded-2xl border border-white/10 bg-white/5 px-10 py-2 text-sm text-zinc-100",
-                    "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
-                    "focus:border-white/18 focus:bg-white/7"
-                  )}
-                />
-                <span
-                  className={cn(
-                    "absolute right-3 top-1/2 -translate-y-1/2",
-                    "rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-zinc-200/55"
-                  )}
-                >
-                  ⌘K
-                </span>
-              </form>
-            </div>
-
-            {/* RIGHT */}
-            <div className="relative z-10 flex items-center gap-2 md:gap-3 shrink-0">
-              <div className="hidden md:flex items-center gap-2">
+            {/* MOBILE ACTION ROW (solves: “moram gore da vidim top bar”, plus no horizontal drift) */}
+            <div className="lg:hidden pb-3">
+              <div
+                className={cn(
+                  "flex items-center gap-2",
+                  "rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl",
+                  "px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_70px_rgba(168,85,247,0.10)]"
+                )}
+              >
                 <button
                   onClick={() => nav("/wallet")}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                     "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.18)]",
                     "active:scale-[0.99] transition"
                   )}
-                  title="Wallet"
                 >
                   <Wallet className="h-4 w-4" />
                   Wallet
@@ -318,49 +433,27 @@ export default function Topbar() {
                   className={cn(
                     "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                     "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(34,211,238,0.16)]",
                     "active:scale-[0.99] transition"
                   )}
-                  title="Create order"
                 >
                   <Plus className="h-4 w-4" />
                   Create
                 </button>
+
+                <form onSubmit={onSubmitSearch} className="relative flex-1 min-w-0">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Search… (wallet, orders, services)"
+                    className={cn(
+                      "w-full rounded-2xl border border-white/10 bg-white/5 px-10 py-2 text-sm text-zinc-100",
+                      "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
+                      "focus:border-white/18 focus:bg-white/7"
+                    )}
+                  />
+                </form>
               </div>
-
-              <div
-                className={cn(
-                  "flex items-center gap-2 rounded-2xl border border-white/10",
-                  "bg-white/5 px-3 py-2 backdrop-blur-xl",
-                  "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_20px_70px_rgba(168,85,247,0.10)]"
-                )}
-                title={userLabel}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 text-xs font-black text-white">
-                  {initials}
-                </div>
-
-                <div className="hidden md:block leading-tight max-w-[180px]">
-                  <div className="text-xs font-semibold text-zinc-100 truncate">{userLabel}</div>
-                  <div className="mt-0.5">
-                    <RolePill role={me?.role} />
-                  </div>
-                </div>
-              </div>
-
-              <button
-                onClick={logout}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-2xl px-3 md:px-4 py-2 text-sm font-semibold text-white",
-                  "border border-white/10 bg-white/5 hover:bg-white/10",
-                  "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_16px_40px_rgba(168,85,247,0.25)]",
-                  "active:scale-[0.99] transition"
-                )}
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="hidden sm:inline">Logout</span>
-              </button>
             </div>
           </div>
         </div>
@@ -368,10 +461,33 @@ export default function Topbar() {
 
       {/* MOBILE DRAWER */}
       {open ? (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
+        <div
+          className="fixed inset-0 z-40 md:hidden"
+          style={{
+            // helps iOS viewport jitter
+            WebkitTransform: "translateZ(0)",
+            transform: "translateZ(0)",
+          }}
+        >
+          {/* overlay */}
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
+            onClick={() => setOpen(false)}
+          />
 
-          <div className="absolute left-0 top-0 h-full w-[88%] max-w-[380px]">
+          {/* panel */}
+          <div
+            ref={drawerRef}
+            className={cn(
+              "absolute left-0 top-0 h-full w-[88%] max-w-[380px]",
+              "overscroll-contain"
+            )}
+            style={{
+              paddingTop: "env(safe-area-inset-top)",
+              paddingBottom: "env(safe-area-inset-bottom)",
+              WebkitOverflowScrolling: "touch",
+            }}
+          >
             <div className="absolute right-3 top-3 z-50">
               <button
                 onClick={() => setOpen(false)}
