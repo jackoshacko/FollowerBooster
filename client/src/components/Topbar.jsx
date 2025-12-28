@@ -78,7 +78,7 @@ export default function Topbar() {
     setOpen(false);
   }, [loc.pathname]);
 
-  // ✅ iOS-safe lock: keep it simple + stable
+  // ✅ simple + reliable lock (no weird layering)
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
@@ -124,9 +124,10 @@ export default function Topbar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // refresh "me" when auth changes
+  // refresh me on auth-changed
   useEffect(() => {
     let alive = true;
+
     const onAuthChanged = async () => {
       try {
         const token = localStorage.getItem("token");
@@ -189,7 +190,7 @@ export default function Topbar() {
 
   return (
     <>
-      {/* ✅ NEMA sticky ovde (sticky je u AppLayout) */}
+      {/* NOTE: sticky is in AppLayout, so Topbar must be relative only */}
       <header className="relative z-30 w-full overflow-x-clip">
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
@@ -202,7 +203,6 @@ export default function Topbar() {
           </div>
 
           <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
-            {/* MAIN BAR */}
             <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
               {/* LEFT */}
               <div className="flex items-center gap-3 min-w-0">
@@ -264,7 +264,7 @@ export default function Topbar() {
                 </div>
               </div>
 
-              {/* CENTER (desktop search only) */}
+              {/* CENTER */}
               <div className="hidden lg:block w-[520px] max-w-[38vw]">
                 <form onSubmit={onSubmitSearch} className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
@@ -410,7 +410,7 @@ export default function Topbar() {
         </div>
       </header>
 
-      {/* ✅ MOBILE DRAWER (FIXED Z-INDEX + PROPER STACKING) */}
+      {/* ✅ MOBILE DRAWER (FIXED LAYERING + SOLID PANEL BG) */}
       {open ? (
         <div
           className="fixed inset-0 z-[9999] md:hidden"
@@ -418,25 +418,27 @@ export default function Topbar() {
         >
           {/* overlay */}
           <div
-            className="absolute inset-0 z-0 bg-black/85 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-black/85 backdrop-blur-[2px]"
             onClick={() => setOpen(false)}
           />
 
-          {/* drawer */}
+          {/* panel */}
           <div
             ref={drawerRef}
             className={cn(
-              "absolute left-0 top-0 z-10 h-full w-[88%] max-w-[380px]",
-              "overflow-y-auto overflow-x-hidden",
-              "overscroll-contain",
-              "touch-pan-y"
+              "absolute left-0 top-0 h-full",
+              "w-[88vw] max-w-[380px]",
+              "overflow-hidden",
+              "border-r border-white/10",
+              // ✅ IMPORTANT: solid base so you don't see page behind
+              "bg-zinc-950/85 backdrop-blur-xl"
             )}
             style={{
               paddingTop: "env(safe-area-inset-top)",
               paddingBottom: "env(safe-area-inset-bottom)",
-              WebkitOverflowScrolling: "touch",
             }}
           >
+            {/* close row */}
             <div className="sticky top-0 z-50 flex justify-end px-3 pt-3">
               <button
                 onClick={() => setOpen(false)}
@@ -451,7 +453,10 @@ export default function Topbar() {
               </button>
             </div>
 
-            <Sidebar mobile onClose={() => setOpen(false)} />
+            {/* IMPORTANT: Sidebar itself handles inner scrolling */}
+            <div className="h-full">
+              <Sidebar mobile onClose={() => setOpen(false)} />
+            </div>
           </div>
         </div>
       ) : null}
