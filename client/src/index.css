@@ -11,24 +11,26 @@ body,
   height: 100%;
   background-color: #0a0a0a;
   color: #f4f4f5;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* ✅ iOS / mobile stability (NO sideways drift) */
+/* ✅ iOS / mobile stability (NO sideways drift + stable scroll) */
 html,
 body {
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: hidden;            /* stop horizontal drift */
   -webkit-text-size-adjust: 100%;
-  overscroll-behavior-x: none;
+  overscroll-behavior-x: none;   /* stop sideways rubber band */
 }
 
-/* ✅ IMPORTANT:
-   DO NOT set touch-action on body (can break nested scroll on iOS Safari) */
+/* Keep vertical scrolling smooth on iOS */
 body {
-  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain; /* reduce “rubber band” jump */
+  touch-action: pan-y;            /* prefer vertical gestures */
 }
 
 /* root must not introduce horizontal scroll */
@@ -38,11 +40,12 @@ body {
   overflow-x: hidden;
 }
 
-/* optional wrapper */
+/* ✅ If you wrap App with .app-shell (from App.jsx fix) */
 .app-shell {
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  touch-action: pan-y;
 }
 
 /* ✅ Prevent elements from causing accidental horizontal scroll */
@@ -53,26 +56,12 @@ svg {
   max-width: 100%;
 }
 
-/* ✅ iOS Safe Area helpers */
+/* ✅ iOS Safe Area padding helpers (Topbar / bottom bars if needed) */
 .safe-top {
   padding-top: env(safe-area-inset-top);
 }
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* ✅ THE REAL FIX:
-   Put iOS momentum scrolling + touch handling on the ACTUAL scroll container */
-.app-scroll {
-  -webkit-overflow-scrolling: touch; /* momentum scroll on iOS */
-  overscroll-behavior-y: contain;
-  touch-action: pan-y; /* only on the scroller, not on body */
-}
-
-/* ✅ If some overlay layer accidentally catches gestures */
-.bg-layer,
-.overlay-layer {
-  pointer-events: none !important;
 }
 
 /* Better text rendering */
@@ -104,6 +93,7 @@ p {
   line-height: 1.6;
 }
 
+/* Small helper for premium headings */
 .text-premium {
   font-weight: 900;
   letter-spacing: -0.025em;
@@ -121,10 +111,13 @@ button {
   font-family: inherit;
 }
 
+/* Smooth hover transitions */
 a,
 button {
-  transition: background-color 0.15s ease, color 0.15s ease,
-    border-color 0.15s ease, transform 0.15s ease;
+  transition: background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease;
 }
 
 /* =========================================================
@@ -171,21 +164,28 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
+/* ✅ Critical: background/overlay layers should never block scroll */
+.pointer-events-none {
+  pointer-events: none !important;
+}
+
 /* =========================================================
    SHADOWS – SOFT / SAAS STYLE
    ========================================================= */
 .shadow-soft {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04),
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
     0 10px 30px rgba(0, 0, 0, 0.45);
 }
 
 .shadow-hover:hover {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08),
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
     0 14px 40px rgba(0, 0, 0, 0.55);
 }
 
 /* =========================================================
-   CARDS / PANELS
+   CARDS / PANELS (OPTIONAL GLOBAL STYLE)
    ========================================================= */
 .card {
   border-radius: 1rem;
@@ -195,17 +195,26 @@ button {
   -webkit-backdrop-filter: blur(18px);
 }
 
+/* =========================================================
+   SELECTION COLOR
+   ========================================================= */
 ::selection {
-  background: rgba(168, 85, 247, 0.35);
+  background: rgba(168, 85, 247, 0.35); /* violet glow */
   color: #fff;
 }
 
 /* =========================================================
-   ANIMATIONS
+   ANIMATIONS (SUBTLE)
    ========================================================= */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .fade-in {
@@ -213,30 +222,99 @@ button {
 }
 
 /* =========================================================
-   TOPBAR ORBS
+   PREMIUM ANIMATED GLOW (SaaS) – AppLayout helpers
+   ========================================================= */
+@keyframes glowFloatSlow {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate(40px, -30px) scale(1.08);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.55;
+  }
+}
+
+@keyframes glowFloatReverse {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translate(-35px, 35px) scale(1.1);
+    opacity: 0.75;
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.5;
+  }
+}
+
+.glow-animate {
+  animation: glowFloatSlow 22s ease-in-out infinite;
+}
+
+.glow-animate-reverse {
+  animation: glowFloatReverse 26s ease-in-out infinite;
+}
+
+/* =========================================================
+   TOPBAR ORBS – used by Topbar.jsx (glow-orb / glow-orb2)
    ========================================================= */
 @keyframes orb-float {
-  0% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
-  50% { transform: translate(30px, 18px) scale(1.12); opacity: 0.85; }
-  100% { transform: translate(0px, 0px) scale(1); opacity: 0.55; }
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: translate(30px, 18px) scale(1.12);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.55;
+  }
 }
 
 @keyframes orb-float-2 {
-  0% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
-  50% { transform: translate(-28px, 22px) scale(1.14); opacity: 0.75; }
-  100% { transform: translate(0px, 0px) scale(1); opacity: 0.45; }
+  0% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate(-28px, 22px) scale(1.14);
+    opacity: 0.75;
+  }
+  100% {
+    transform: translate(0px, 0px) scale(1);
+    opacity: 0.45;
+  }
 }
 
-.glow-orb { animation: orb-float 8s ease-in-out infinite; }
-.glow-orb2 { animation: orb-float-2 10s ease-in-out infinite; }
+.glow-orb {
+  animation: orb-float 8s ease-in-out infinite;
+}
 
-/* reduce motion */
+.glow-orb2 {
+  animation: orb-float-2 10s ease-in-out infinite;
+}
+
+/* =========================================================
+   Respect OS setting: reduce motion
+   ========================================================= */
 @media (prefers-reduced-motion: reduce) {
+  .glow-animate,
+  .glow-animate-reverse,
   .glow-orb,
   .glow-orb2,
   .fade-in {
     animation: none !important;
   }
+
   a,
   button {
     transition: none !important;
