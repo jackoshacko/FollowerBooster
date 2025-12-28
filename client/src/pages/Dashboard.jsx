@@ -1,4 +1,6 @@
+// client/src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
 import {
   RefreshCcw,
@@ -21,24 +23,27 @@ import {
   SlidersHorizontal,
   Search,
   X,
+  Lock,
+  FileText,
+  Shield,
 } from "lucide-react";
 
 import bgSmm2 from "../assets/backgroundsmm2.jpg";
 
+/* =========================
+   Helpers
+========================= */
 function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
-
 function round2(n) {
   const x = Number(n || 0);
   return Math.round(x * 100) / 100;
 }
-
 function safeNum(n, fallback = 0) {
   const x = Number(n);
   return Number.isFinite(x) ? x : fallback;
 }
-
 function fmtMoney(n, currency = "EUR") {
   const v = safeNum(n, 0);
   try {
@@ -51,7 +56,6 @@ function fmtMoney(n, currency = "EUR") {
     return `${round2(v)} ${currency}`;
   }
 }
-
 function fmtInt(n) {
   const v = Math.round(safeNum(n, 0));
   try {
@@ -60,35 +64,29 @@ function fmtInt(n) {
     return String(v);
   }
 }
-
 function fmtPct(n) {
   const v = safeNum(n, 0);
   return `${Math.round(v * 10) / 10}%`;
 }
-
 function shortId(id) {
   const s = String(id || "");
   if (s.length <= 10) return s;
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
-
 function relTime(iso) {
   if (!iso) return "";
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return String(iso);
-
   const diff = Date.now() - t;
   const sec = Math.floor(diff / 1000);
   const min = Math.floor(sec / 60);
   const hr = Math.floor(min / 60);
   const day = Math.floor(hr / 24);
-
   if (sec < 30) return "just now";
   if (min < 60) return `${min}m ago`;
   if (hr < 24) return `${hr}h ago`;
   return `${day}d ago`;
 }
-
 async function copyText(s) {
   try {
     await navigator.clipboard.writeText(String(s ?? ""));
@@ -107,9 +105,10 @@ function normalizeStatus(raw) {
 
   if (["completed", "success", "successful", "done", "finished", "complete"].includes(x)) return "completed";
   if (["failed", "fail", "error"].includes(x)) return "failed";
-  if (["canceled", "cancelled", "refunded", "refund"].includes(x)) return "failed"; // treat as failed bucket
+  if (["canceled", "cancelled", "refunded", "refund"].includes(x)) return "failed";
   if (["pending", "queued", "queue", "waiting", "created", "new"].includes(x)) return "pending";
-  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x)) return "processing";
+  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x))
+    return "processing";
   return x || "processing";
 }
 
@@ -127,7 +126,6 @@ function make7dLabelsUTC(now = new Date()) {
   }
   return labels;
 }
-
 function dayKeyUTC(dateLike) {
   const d = new Date(dateLike);
   if (!Number.isFinite(d.getTime())) return null;
@@ -137,9 +135,9 @@ function dayKeyUTC(dateLike) {
   return `${y}-${m}-${dd}`;
 }
 
-/**
- * Premium glass card (background texture + glass + gradients)
- */
+/* =========================
+   UI Primitives
+========================= */
 function Card({ title, right, icon: Icon, children, className }) {
   return (
     <div
@@ -152,6 +150,7 @@ function Card({ title, right, icon: Icon, children, className }) {
         className
       )}
     >
+      {/* IMPORTANT: pointer-events-none overlay, so it never blocks scroll/touch */}
       <div className="pointer-events-none absolute inset-0">
         <div
           className="absolute inset-0 bg-cover bg-center opacity-[0.22] transition-opacity duration-200 group-hover:opacity-[0.28]"
@@ -222,8 +221,7 @@ function KpiValue({ loading, value, sub, trend }) {
     );
   }
 
-  const trendTone =
-    trend == null ? "neutral" : trend > 0 ? "ok" : trend < 0 ? "bad" : "neutral";
+  const trendTone = trend == null ? "neutral" : trend > 0 ? "ok" : trend < 0 ? "bad" : "neutral";
 
   return (
     <div>
@@ -264,7 +262,14 @@ function MiniBars({ data, height = 52 }) {
 
 function RowItem({ left, right, onCopy, onOpen }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur-xl transition hover:bg-white/10">
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3",
+        "backdrop-blur-xl transition hover:bg-white/10",
+        // mobile scroll fix: make sure row doesn't capture pan gestures weirdly
+        "touch-pan-y"
+      )}
+    >
       <div className="min-w-0">{left}</div>
       <div className="flex shrink-0 items-center gap-2">
         {right ? <div className="text-sm font-semibold text-white">{right}</div> : null}
@@ -294,13 +299,15 @@ function RowItem({ left, right, onCopy, onOpen }) {
 }
 
 /**
- * Responsive Masonry grid (pure CSS columns, no deps)
+ * Masonry Safe:
+ * - Mobile: GRID (no columns) => no “tap to scroll”
+ * - Desktop: CSS columns masonry
  */
 function Masonry({ children }) {
   return (
-    <div className={cn("masonry gap-4")}>
+    <div className="masonrySafe">
       {React.Children.map(children, (child, idx) => (
-        <div key={idx} className="mb-4 break-inside-avoid">
+        <div key={idx} className="masonryItem">
           {child}
         </div>
       ))}
@@ -339,6 +346,7 @@ const initial = {
 
 export default function Dashboard() {
   const [s, setS] = useState(initial);
+
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
 
@@ -348,6 +356,16 @@ export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
 
+  // scroll fix helper: force page to be scroll container
+  // (prevents nested scroll issues when layout has overflow hidden)
+  useEffect(() => {
+    const prev = document.body.style.overscrollBehaviorY;
+    document.body.style.overscrollBehaviorY = "none";
+    return () => {
+      document.body.style.overscrollBehaviorY = prev;
+    };
+  }, []);
+
   function showToast(msg) {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -356,7 +374,6 @@ export default function Dashboard() {
 
   /** ===== fallback: compute live metrics from /orders ===== */
   async function buildFallbackFromOrders(currencyGuess = "EUR") {
-    // /orders returns user orders (you already have route)
     const list = await api.get("/orders").catch(() => []);
     const orders = Array.isArray(list) ? list : [];
 
@@ -377,7 +394,6 @@ export default function Dashboard() {
 
     const seriesOrders = labels.map((l) => dayMap.get(l) || 0);
 
-    // recent orders for dashboard: reuse newest 12
     const recentOrders = orders
       .slice()
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
@@ -407,10 +423,8 @@ export default function Dashboard() {
     try {
       const d = await api.get("/api/dashboard");
 
-      // currency + base (always)
       const nextCurrency = String(d.currency || s.currency || "EUR").toUpperCase();
 
-      // robust extract
       const pendingOrders = d.pendingOrders;
       const processingOrders = d.processingOrders;
       const completedOrders = d.completedOrders;
@@ -419,11 +433,9 @@ export default function Dashboard() {
       const hasOrderBreakdown =
         pendingOrders != null || processingOrders != null || completedOrders != null || failedOrders != null;
 
-      // series sanity
       const series7d = d.series7d || { labels: [], orders: [], topups: [] };
       const seriesOrdersLen = Array.isArray(series7d?.orders) ? series7d.orders.length : 0;
 
-      // if backend returns partial dashboard, build fallback from /orders
       let fallback = null;
       if (!hasOrderBreakdown || seriesOrdersLen !== 7) {
         fallback = await buildFallbackFromOrders(nextCurrency);
@@ -435,12 +447,8 @@ export default function Dashboard() {
       const computedCompleted = safeNum(completedOrders ?? fbCounts.completed ?? 0);
       const computedFailed = safeNum(failedOrders ?? fbCounts.failed ?? 0);
 
-      const computedActive =
-        d.activeOrders != null
-          ? safeNum(d.activeOrders, 0)
-          : computedPending + computedProcessing;
+      const computedActive = d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
 
-      // merge series7d orders fallback if missing
       const mergedSeries7d = {
         labels:
           Array.isArray(series7d?.labels) && series7d.labels.length === 7
@@ -450,14 +458,13 @@ export default function Dashboard() {
           Array.isArray(series7d?.orders) && series7d.orders.length === 7
             ? series7d.orders
             : fallback?.series7dOrders?.orders || [0, 0, 0, 0, 0, 0, 0],
-        topups: Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
+        topups:
+          Array.isArray(series7d?.topups) && series7d.topups.length === 7
+            ? series7d.topups
+            : [0, 0, 0, 0, 0, 0, 0],
       };
 
-      // lastOrders fallback if missing / empty
-      const lastOrders =
-        Array.isArray(d.lastOrders) && d.lastOrders.length
-          ? d.lastOrders
-          : fallback?.recentOrders || [];
+      const lastOrders = Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
 
       setS((p) => ({
         ...p,
@@ -499,12 +506,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       if (!alive) return;
       await load();
     })();
 
-    // refresh when tab becomes visible (after create-order)
     function onVis() {
       if (document.visibilityState === "visible") load({ silent: true });
     }
@@ -526,7 +533,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!autoRefresh) return;
-    const ms = Math.max(5, Number(refreshEvery || 12)) * 1000;
+    const ms = Math.max(6, Number(refreshEvery || 12)) * 1000;
     const t = setInterval(() => load({ silent: true }), ms);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -545,27 +552,19 @@ export default function Dashboard() {
     return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
   }, [s.series7d]);
 
-  const orders7dTotal = useMemo(
-    () => ordersBars.reduce((a, b) => a + safeNum(b, 0), 0),
-    [ordersBars]
-  );
-
-  const topups7dTotal = useMemo(
-    () => topupsBars.reduce((a, b) => a + safeNum(b, 0), 0),
-    [topupsBars]
-  );
+  const orders7dTotal = useMemo(() => ordersBars.reduce((a, b) => a + safeNum(b, 0), 0), [ordersBars]);
+  const topups7dTotal = useMemo(() => topupsBars.reduce((a, b) => a + safeNum(b, 0), 0), [topupsBars]);
 
   const health = useMemo(() => {
     const failed = safeNum(s.failedOrders, 0);
     const pending = safeNum(s.pendingOrders, 0);
     const processing = safeNum(s.processingOrders, 0);
 
-    const riskScore = failed * 2 + Math.max(0, pending - 5) * 0.5 + Math.max(0, processing - 10) * 0.3;
+    const riskScore =
+      failed * 2 + Math.max(0, pending - 5) * 0.5 + Math.max(0, processing - 10) * 0.3;
 
     const tone = riskScore === 0 ? "ok" : riskScore < 4 ? "warn" : "bad";
-    const msg =
-      tone === "ok" ? "Clean run" : tone === "warn" ? "Watch list" : "Needs attention";
-
+    const msg = tone === "ok" ? "Clean run" : tone === "warn" ? "Watch list" : "Needs attention";
     return { tone, msg, riskScore: Math.round(riskScore * 10) / 10 };
   }, [s.failedOrders, s.pendingOrders, s.processingOrders]);
 
@@ -607,12 +606,7 @@ export default function Dashboard() {
   }, [s.lastUpdatedAt]);
 
   const totalOrdersSnapshot = useMemo(() => {
-    return (
-      safeNum(s.completedOrders, 0) +
-      safeNum(s.failedOrders, 0) +
-      safeNum(s.pendingOrders, 0) +
-      safeNum(s.processingOrders, 0)
-    );
+    return safeNum(s.completedOrders, 0) + safeNum(s.failedOrders, 0) + safeNum(s.pendingOrders, 0) + safeNum(s.processingOrders, 0);
   }, [s.completedOrders, s.failedOrders, s.pendingOrders, s.processingOrders]);
 
   const filteredOrders = useMemo(() => {
@@ -644,22 +638,48 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
+      {/* ===== MOBILE SCROLL + MASONRY SAFE CSS ===== */}
       <style>{`
-        .masonry { column-gap: 1rem; }
-        @media (min-width: 640px){ .masonry{ column-count: 2; } }
-        @media (min-width: 1024px){ .masonry{ column-count: 3; } }
-        @media (min-width: 1536px){ .masonry{ column-count: 4; } }
+        /* Never let overlays block touch */
+        .noTouchBlock, .noTouchBlock * { touch-action: pan-y; }
+
+        /* Mobile-first: GRID (no columns) => fixes “tap to scroll” on phones */
+        .masonrySafe{
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 1rem;
+          touch-action: pan-y;
+        }
+        .masonryItem{ break-inside: avoid; }
+
+        /* Desktop: columns masonry */
+        @media (min-width: 768px){
+          .masonrySafe{
+            display: block;
+            column-gap: 1rem;
+            column-count: 2;
+          }
+          .masonryItem{
+            display: inline-block;
+            width: 100%;
+            margin: 0 0 1rem 0;
+          }
+        }
+        @media (min-width: 1024px){ .masonrySafe{ column-count: 3; } }
+        @media (min-width: 1536px){ .masonrySafe{ column-count: 4; } }
       `}</style>
 
+      {/* Toast: pointer-events-none so it NEVER blocks scroll */}
       {toast ? (
-        <div className="fixed right-6 top-6 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
+        <div className="pointer-events-none fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
           {toast}
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      {/* HEADER */}
+      <div className="noTouchBlock flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
             <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
               <Sparkles className="h-3.5 w-3.5" />
@@ -668,10 +688,13 @@ export default function Dashboard() {
             <Chip tone="violet">
               <Zap className="h-3.5 w-3.5" /> 2050 Mode
             </Chip>
+            <Chip tone="info">
+              <Lock className="h-3.5 w-3.5" /> Protected
+            </Chip>
           </div>
 
           <div className="mt-1 text-sm text-zinc-100/70">
-            Balance, orders, spend, ops & intelligence — “million euro” panel vibes.
+            Balance, orders, spend, ops & intelligence — ultra clean panel.
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -688,6 +711,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex flex-col items-stretch gap-2 lg:items-end">
+          {/* ACTIONS */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
@@ -703,38 +727,40 @@ export default function Dashboard() {
               <RefreshCcw className="h-4 w-4" /> Refresh
             </button>
 
-            <a
+            {/* IMPORTANT: Link (no full reload) */}
+            <Link
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
                 "hover:bg-white/10"
               )}
-              href="/wallet"
+              to="/wallet"
             >
               <Wallet className="h-4 w-4" /> Wallet
-            </a>
+            </Link>
 
-            <a
+            <Link
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
                 "hover:bg-white/20",
                 "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_40px_rgba(56,189,248,0.16)]"
               )}
-              href="/create-order"
+              to="/create-order"
             >
               <ShoppingCart className="h-4 w-4" /> Create order
-            </a>
+            </Link>
 
-            <a
+            <Link
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
                 "hover:bg-white/10"
               )}
-              href="/services"
+              to="/services"
             >
               <Layers className="h-4 w-4" /> Services
-            </a>
+            </Link>
           </div>
 
+          {/* CONTROLS */}
           <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
             <button
               onClick={() => setAutoRefresh((x) => !x)}
@@ -766,11 +792,7 @@ export default function Dashboard() {
                 className="w-44 bg-transparent text-xs outline-none placeholder:text-zinc-100/40"
               />
               {search ? (
-                <button
-                  onClick={() => setSearch("")}
-                  className="rounded-lg p-1 hover:bg-white/10"
-                  title="Clear"
-                >
+                <button onClick={() => setSearch("")} className="rounded-lg p-1 hover:bg-white/10" title="Clear">
                   <X className="h-4 w-4" />
                 </button>
               ) : null}
@@ -792,6 +814,7 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ERROR */}
       {s.error ? (
         <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 backdrop-blur-xl">
           <div className="text-sm text-red-200">⚠️ {s.error}</div>
@@ -804,13 +827,12 @@ export default function Dashboard() {
         </div>
       ) : null}
 
+      {/* GRID / MASONRY */}
       <Masonry>
         <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <div className="text-4xl font-black tracking-tight">
-                {loading ? "—" : fmtMoney(s.balance, currency)}
-              </div>
+              <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
               <div className="flex flex-wrap gap-2">
                 <Chip tone="info">
                   <Boxes className="h-3.5 w-3.5" /> Orders snapshot: {fmtInt(totalOrdersSnapshot)}
@@ -820,7 +842,7 @@ export default function Dashboard() {
             </div>
 
             <div className="text-sm text-zinc-100/70">
-              Wallet funds are used instantly on checkout. Top up & place orders in seconds.
+              Wallet funds are used instantly at checkout. Top up & place orders in seconds.
             </div>
 
             <Divider />
@@ -835,10 +857,13 @@ export default function Dashboard() {
                 <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">Health</div>
-                <div className="mt-1 flex items-center gap-2">
-                  <Chip tone={health.tone}>
-                    <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
+                <div className="text-xs text-zinc-100/60">Protection</div>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <Chip tone="info">
+                    <Shield className="h-3.5 w-3.5" /> Rate limited
+                  </Chip>
+                  <Chip tone="neutral">
+                    <Lock className="h-3.5 w-3.5" /> Token auth
                   </Chip>
                 </div>
               </div>
@@ -847,11 +872,7 @@ export default function Dashboard() {
         </Card>
 
         <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
-          <KpiValue
-            loading={loading}
-            value={loading ? "" : fmtInt(s.activeOrders)}
-            sub="Pending/processing orders right now."
-          />
+          <KpiValue loading={loading} value={loading ? "" : fmtInt(s.activeOrders)} sub="Pending/processing orders right now." />
           <Divider />
           <div className="flex flex-wrap gap-2 text-xs">
             <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
@@ -884,7 +905,7 @@ export default function Dashboard() {
               </div>
 
               <div className="text-xs text-zinc-100/60">
-                7-day performance estimate. Perfect for scaling decisions.
+                7-day performance estimate. For scaling decisions.
               </div>
 
               <div className="flex flex-wrap gap-2">
@@ -964,26 +985,26 @@ export default function Dashboard() {
                 <div className="text-sm font-semibold">{refreshEvery}s</div>
               </div>
               <div className="mt-2 text-xs text-zinc-100/60">
-                Later we can replace this with Socket.IO for true instant events.
+                Later: swap polling for realtime events.
               </div>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
-              <a href="/wallet" className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm hover:bg-white/10">
+              <Link to="/wallet" className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm hover:bg-white/10">
                 <div className="flex items-center gap-2">
                   <Wallet className="h-4 w-4" />
                   <span className="font-semibold">Top up</span>
                 </div>
                 <div className="mt-1 text-xs text-zinc-100/60">Add funds & keep orders flowing.</div>
-              </a>
+              </Link>
 
-              <a href="/create-order" className="rounded-2xl border border-white/10 bg-white/10 p-3 text-sm hover:bg-white/15">
+              <Link to="/create-order" className="rounded-2xl border border-white/10 bg-white/10 p-3 text-sm hover:bg-white/15">
                 <div className="flex items-center gap-2">
                   <ShoppingCart className="h-4 w-4" />
                   <span className="font-semibold">Create order</span>
                 </div>
                 <div className="mt-1 text-xs text-zinc-100/60">Buy in seconds with wallet.</div>
-              </a>
+              </Link>
             </div>
           </div>
         </Card>
@@ -995,12 +1016,8 @@ export default function Dashboard() {
                 <Chip tone="info">{s.provider?.name || "provider"}</Chip>
                 <Chip tone="neutral">balance</Chip>
               </div>
-              <div className="text-3xl font-black tracking-tight">
-                {fmtMoney(s.provider?.balance ?? 0, s.provider?.currency || currency)}
-              </div>
-              <div className="text-xs text-zinc-100/60">
-                If you later expose provider balance in /api/dashboard, this card becomes live.
-              </div>
+              <div className="text-3xl font-black tracking-tight">{fmtMoney(s.provider?.balance ?? 0, s.provider?.currency || currency)}</div>
+              <div className="text-xs text-zinc-100/60">Optional backend enrichment (safe).</div>
             </div>
           </Card>
         ) : null}
@@ -1040,20 +1057,14 @@ export default function Dashboard() {
 
                 const st = status.toLowerCase();
                 const tone =
-                  st.includes("confirm") || st.includes("success")
-                    ? "ok"
-                    : st.includes("pend")
-                    ? "warn"
-                    : st.includes("fail")
-                    ? "bad"
-                    : "neutral";
+                  st.includes("confirm") || st.includes("success") ? "ok" : st.includes("pend") ? "warn" : st.includes("fail") ? "bad" : "neutral";
 
                 return (
                   <RowItem
                     key={String(id)}
                     left={
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Chip tone="neutral">{provider}</Chip>
                           <Chip tone={tone}>{status}</Chip>
                           <span className="text-xs text-zinc-100/60">{created ? relTime(created) : ""}</span>
@@ -1077,9 +1088,7 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-zinc-100/60">
-              No topups yet. Go to Wallet and top up.
-            </div>
+            <div className="text-sm text-zinc-100/60">No topups yet. Go to Wallet and top up.</div>
           )}
         </Card>
 
@@ -1117,7 +1126,7 @@ export default function Dashboard() {
                     key={String(id)}
                     left={
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Chip tone={tone}>{status}</Chip>
                           <span className="truncate text-sm text-zinc-100">{serviceName}</span>
                         </div>
@@ -1141,16 +1150,49 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-zinc-100/60">
-              No orders yet. Create your first order.
-            </div>
+            <div className="text-sm text-zinc-100/60">No orders yet. Create your first order.</div>
           )}
         </Card>
       </Masonry>
 
-      <div className="text-xs text-zinc-100/50">
-        2050 masonry dashboard ✅ — fallback enabled: if /api/dashboard is partial, we compute LIVE from /orders.
+      {/* LEGAL / PROTECTED FOOTER (safe wording, looks pro) */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-zinc-100/70 backdrop-blur-xl">
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip tone="info">
+            <Lock className="h-3.5 w-3.5" /> Protected dashboard
+          </Chip>
+          <Chip tone="neutral">
+            <Shield className="h-3.5 w-3.5" /> Abuse prevention (rate limiting)
+          </Chip>
+          <Chip tone="neutral">
+            <FileText className="h-3.5 w-3.5" /> Policies
+          </Chip>
+        </div>
+
+        <div className="mt-2 leading-relaxed">
+          Access to this panel is restricted to authenticated users. Payments and top-ups are processed by supported providers.
+          We store only the minimum required data for account access and order processing. For details, see our policy pages.
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-3">
+          <Link className="underline decoration-white/20 hover:decoration-white/50" to="/terms">
+            Terms
+          </Link>
+          <Link className="underline decoration-white/20 hover:decoration-white/50" to="/privacy">
+            Privacy
+          </Link>
+          <Link className="underline decoration-white/20 hover:decoration-white/50" to="/refund">
+            Refunds
+          </Link>
+          <span className="text-zinc-100/50">•</span>
+          <span className="text-zinc-100/50">2050 Masonry ✅</span>
+        </div>
+      </div>
+
+      <div className="text-[11px] text-zinc-100/45">
+        Tip: Mobile scroll is fixed by using grid on small screens (no CSS columns). Desktop keeps masonry columns.
       </div>
     </div>
   );
 }
+
