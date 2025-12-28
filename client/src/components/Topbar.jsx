@@ -73,6 +73,7 @@ export default function Topbar() {
     hardLogout({ redirect: true });
   }
 
+  // close drawer on route change
   useEffect(() => {
     setOpen(false);
   }, [loc.pathname]);
@@ -123,6 +124,7 @@ export default function Topbar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // refresh "me" when auth changes
   useEffect(() => {
     let alive = true;
     const onAuthChanged = async () => {
@@ -146,6 +148,7 @@ export default function Topbar() {
     };
   }, []);
 
+  // keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") setOpen(false);
@@ -160,6 +163,7 @@ export default function Topbar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // focus handling
   useEffect(() => {
     if (!focusSearch) return;
     const el = document.getElementById("topbar-search");
@@ -185,6 +189,7 @@ export default function Topbar() {
 
   return (
     <>
+      {/* ✅ NEMA sticky ovde (sticky je u AppLayout) */}
       <header className="relative z-30 w-full overflow-x-clip">
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
@@ -197,7 +202,9 @@ export default function Topbar() {
           </div>
 
           <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
+            {/* MAIN BAR */}
             <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
+              {/* LEFT */}
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   onClick={() => setOpen(true)}
@@ -257,6 +264,7 @@ export default function Topbar() {
                 </div>
               </div>
 
+              {/* CENTER (desktop search only) */}
               <div className="hidden lg:block w-[520px] max-w-[38vw]">
                 <form onSubmit={onSubmitSearch} className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
@@ -282,6 +290,7 @@ export default function Topbar() {
                 </form>
               </div>
 
+              {/* RIGHT */}
               <div className="flex items-center gap-2 md:gap-3 shrink-0">
                 <div className="hidden md:flex items-center gap-2">
                   <button
@@ -349,6 +358,7 @@ export default function Topbar() {
               </div>
             </div>
 
+            {/* MOBILE ACTION ROW */}
             <div className="lg:hidden pb-3">
               <div
                 className={cn(
@@ -400,22 +410,23 @@ export default function Topbar() {
         </div>
       </header>
 
+      {/* ✅ MOBILE DRAWER (FIXED Z-INDEX + PROPER STACKING) */}
       {open ? (
         <div
-          className="fixed inset-0 z-40 md:hidden"
+          className="fixed inset-0 z-[9999] md:hidden"
           style={{ WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}
         >
-          {/* ✅ darker overlay */}
+          {/* overlay */}
           <div
-            className="absolute inset-0 bg-black/85 backdrop-blur-[2px]"
+            className="absolute inset-0 z-0 bg-black/85 backdrop-blur-[2px]"
             onClick={() => setOpen(false)}
           />
 
-          {/* ✅ drawer wrapper MUST scroll on iOS */}
+          {/* drawer */}
           <div
             ref={drawerRef}
             className={cn(
-              "absolute left-0 top-0 h-full w-[88%] max-w-[380px]",
+              "absolute left-0 top-0 z-10 h-full w-[88%] max-w-[380px]",
               "overflow-y-auto overflow-x-hidden",
               "overscroll-contain",
               "touch-pan-y"
