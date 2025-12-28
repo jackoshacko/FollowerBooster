@@ -112,7 +112,8 @@ function normalizeStatus(raw) {
   if (["failed", "fail", "error"].includes(x)) return "failed";
   if (["canceled", "cancelled", "refunded", "refund"].includes(x)) return "failed";
   if (["pending", "queued", "queue", "waiting", "created", "new"].includes(x)) return "pending";
-  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x)) return "processing";
+  if (["processing", "in_progress", "inprogress", "active", "progress", "running", "partial"].includes(x))
+    return "processing";
   return x || "processing";
 }
 
@@ -140,20 +141,25 @@ function dayKeyUTC(dateLike) {
   return `${y}-${m}-${dd}`;
 }
 
-/* ================= UI building blocks ================= */
-
+/* ================= platform detection ================= */
+// iOS device
 const IS_IOS =
   typeof navigator !== "undefined" &&
   /iPad|iPhone|iPod/.test(navigator.userAgent) &&
   !window.MSStream;
 
-// WhatsApp / Instagram in-app browsers are iOS WebViews too
+// In-app webviews often behave worse with blur + scroll
 const IS_WEBVIEW =
   typeof navigator !== "undefined" &&
   /(FBAN|FBAV|Instagram|Line|WhatsApp)/i.test(navigator.userAgent || "");
 
-// On iOS webviews, heavy backdrop blur causes scroll jank + “tap then scroll”
+// ✅ Key fix: disable heavy blur on iOS/WebView (prevents “tap then scroll” + jank)
 const DISABLE_HEAVY_BLUR = IS_IOS && IS_WEBVIEW;
+
+// Optional: also disable blur on iOS Safari if you want maximum smoothness.
+// const DISABLE_HEAVY_BLUR = IS_IOS;
+
+/* ================= UI building blocks ================= */
 
 function Card({ title, right, icon: Icon, children, className }) {
   return (
@@ -162,26 +168,29 @@ function Card({ title, right, icon: Icon, children, className }) {
         "relative overflow-hidden rounded-2xl border border-white/10",
         "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_10px_30px_rgba(0,0,0,0.45)]",
         "bg-black/30",
-        "will-change-auto",
+        "isolate", // ✅ creates new stacking context (reduces weird overlay/touch bugs)
         className
       )}
     >
-      {/* Background layers must never capture touch */}
+      {/* IMPORTANT: background layers MUST NOT capture touch */}
       <div className="pointer-events-none absolute inset-0">
         <div
           className="absolute inset-0 bg-cover bg-center opacity-[0.22]"
           style={{ backgroundImage: `url(${bgSmm2})` }}
         />
-        {/* Blur only where safe; WebView gets a solid glass fallback */}
+
+        {/* On iOS webviews, blur causes scroll issues; use solid glass fallback */}
         {DISABLE_HEAVY_BLUR ? (
-          <div className="absolute inset-0 bg-black/55" />
+          <div className="absolute inset-0 bg-black/60" />
         ) : (
           <div className="absolute inset-0 bg-black/40 supports-[backdrop-filter]:bg-black/25 supports-[backdrop-filter]:backdrop-blur-xl" />
         )}
+
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-black/35" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-transparent to-black/30" />
       </div>
 
+      {/* Content */}
       <div className="relative p-4">
         <header className="mb-2 flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -282,7 +291,7 @@ function MiniBars({ data, height = 52 }) {
 }
 
 function RowItem({ left, right, onCopy, onOpen }) {
-  // Blur here is tiny, but on iOS WebView we still keep it safe.
+  // Minimal blur only when safe
   const glassClass = DISABLE_HEAVY_BLUR
     ? "bg-white/5"
     : "bg-white/5 supports-[backdrop-filter]:backdrop-blur-md";
@@ -324,7 +333,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
 }
 
 /**
- * MOBILE = GRID (no columns) ✅
+ * MOBILE = GRID ✅
  * DESKTOP = CSS columns masonry ✅
  */
 function Masonry({ children }) {
@@ -344,7 +353,6 @@ function Masonry({ children }) {
 }
 
 /* ================= state ================= */
-
 const initial = {
   loading: true,
   error: "",
@@ -386,6 +394,8 @@ export default function Dashboard() {
   const [onlyProblems, setOnlyProblems] = useState(false);
 
   const lastSig = useRef("");
+  const pullStartY = useRef(null);
+  const pulling = useRef(false);
 
   function showToast(msg) {
     setToast(msg);
@@ -462,8 +472,7 @@ export default function Dashboard() {
       const computedCompleted = safeNum(completedOrders ?? fbCounts.completed ?? 0);
       const computedFailed = safeNum(failedOrders ?? fbCounts.failed ?? 0);
 
-      const computedActive =
-        d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
+      const computedActive = d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
 
       const mergedSeries7d = {
         labels:
@@ -526,6 +535,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       if (!alive) return;
       await load();
@@ -581,7 +591,7 @@ export default function Dashboard() {
 
     const riskScore = failed * 2 + Math.max(0, pending - 5) * 0.5 + Math.max(0, processing - 10) * 0.3;
     const tone = riskScore === 0 ? "ok" : riskScore < 4 ? "warn" : "bad";
-    const msg = tone === "ok" ? "Clean run" : tone === "warn" ? "Watch list" : "Needs attention";
+    const msg = tone === "ok" ? "All clear" : tone === "warn" ? "Watchlist" : "Needs attention";
     return { tone, msg, riskScore: Math.round(riskScore * 10) / 10 };
   }, [s.failedOrders, s.pendingOrders, s.processingOrders]);
 
@@ -657,34 +667,54 @@ export default function Dashboard() {
     });
   }, [s.lastTopups, search]);
 
+  // ✅ Pull-to-refresh feel for mobile (non-blocking, safe)
+  function onTouchStart(e) {
+    if (!IS_IOS && !("ontouchstart" in window)) return;
+    if (window.scrollY !== 0) return; // only at top
+    pullStartY.current = e.touches?.[0]?.clientY ?? null;
+    pulling.current = true;
+  }
+  async function onTouchEnd(e) {
+    if (!pulling.current) return;
+    pulling.current = false;
+    const endY = e.changedTouches?.[0]?.clientY ?? null;
+    const startY = pullStartY.current;
+    pullStartY.current = null;
+    if (startY == null || endY == null) return;
+    if (endY - startY > 70) {
+      showToast("Refreshing…");
+      await load();
+    }
+  }
+
   return (
     <div
       className={cn(
         "dashboard-root",
         "w-full",
-        "overflow-x-hidden", // ✅ stops iOS “zoom/pan sideways” caused by tiny overflow
+        "overflow-x-hidden",
         "pb-[max(env(safe-area-inset-bottom),16px)]"
       )}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
     >
       <style>{`
-        /* ===== Global mobile safety (prevents iOS weird zoom/layout shifts) ===== */
         :root { -webkit-text-size-adjust: 100%; }
         html, body { width: 100%; overflow-x: hidden; }
-
-        /* Smooth + correct scrolling on iOS */
+        /* ✅ Critical: avoid scroll lock + “tap to scroll” */
+        body { overscroll-behavior-y: contain; }
+        /* Mobile scrolling safety */
         .dashboard-scroll {
           -webkit-overflow-scrolling: touch;
           touch-action: pan-y;
           overscroll-behavior-y: contain;
         }
-
         /* Desktop masonry only */
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
-
-        /* iOS Safari/WebView: avoid auto-zoom on inputs (must be >=16px) */
+        /* iOS auto-zoom on inputs fix (>=16px) */
         @media (max-width: 767px){
           .mobile-nozoom input,
           .mobile-nozoom select,
@@ -693,9 +723,10 @@ export default function Dashboard() {
             line-height: 1.25rem !important;
           }
         }
-
-        /* Don’t let any element force horizontal overflow */
+        /* Prevent accidental horizontal overflow from long ids/urls */
         .no-x-overflow * { max-width: 100%; }
+        /* ✅ If any overlay ever blocks scrolling, this helps */
+        .pointer-fix { pointer-events: auto; }
       `}</style>
 
       {toast ? (
@@ -704,144 +735,158 @@ export default function Dashboard() {
         </div>
       ) : null}
 
-      {/* ✅ Centered container; prevents “zoomed” feel on mobile */}
       <div className="dashboard-scroll no-x-overflow mx-auto w-full max-w-[1200px] space-y-5 px-4 sm:px-5">
-        {/* ===== Header ===== */}
-        <div className="mobile-nozoom flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
-              <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
-                <Sparkles className="h-3.5 w-3.5" />
-                {autoRefresh ? "Live" : "Paused"}
-              </Chip>
-              <Chip tone="violet">
-                <Zap className="h-3.5 w-3.5" /> 2050 Mode
-              </Chip>
-              <Chip tone="info">
-                <Lock className="h-3.5 w-3.5" /> Protected
-              </Chip>
-            </div>
+        {/* ===== Sticky header for mobile (always usable, never blocks scroll) ===== */}
+        <div className="sticky top-0 z-40 -mx-4 px-4 sm:-mx-5 sm:px-5 pt-3 pb-3">
+          <div
+            className={cn(
+              "rounded-2xl border border-white/10 bg-black/60",
+              DISABLE_HEAVY_BLUR ? "" : "supports-[backdrop-filter]:backdrop-blur-xl supports-[backdrop-filter]:bg-black/35",
+              "shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
+            )}
+          >
+            <div className="p-3 mobile-nozoom">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-2xl font-black tracking-tight md:text-3xl">Dashboard</div>
+                    <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {autoRefresh ? "Live" : "Paused"}
+                    </Chip>
+                    <Chip tone="violet">
+                      <Zap className="h-3.5 w-3.5" /> 2050 Mode
+                    </Chip>
+                    <Chip tone="info">
+                      <Lock className="h-3.5 w-3.5" /> Secure
+                    </Chip>
+                  </div>
 
-            <div className="mt-1 text-sm text-zinc-100/70">
-              Balance, orders, spend, ops & intelligence — ultra-clean operations panel.
-            </div>
+                  <div className="mt-1 text-sm text-zinc-100/70">
+                    Real-time wallet, orders, and ops insights — built for scale.
+                  </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Chip tone="info">
-                <Wallet className="h-3.5 w-3.5" /> Wallet-ready
-              </Chip>
-              <Chip tone={health.tone}>
-                <ShieldCheck className="h-3.5 w-3.5" /> {health.msg} (risk {health.riskScore})
-              </Chip>
-              <Chip tone="neutral">{realtimeLabel}</Chip>
-            </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Chip tone={health.tone}>
+                      <ShieldCheck className="h-3.5 w-3.5" /> {health.msg} (risk {health.riskScore})
+                    </Chip>
+                    <Chip tone="neutral">{realtimeLabel}</Chip>
+                  </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">{statusBadges}</div>
-          </div>
+                  <div className="mt-2 flex flex-wrap gap-2">{statusBadges}</div>
+                </div>
 
-          {/* ✅ Mobile-safe controls: stacked on small screens (no horizontal overflow) */}
-          <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
-            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
-              <button
-                onClick={() => {
-                  load();
-                  showToast("Refreshing…");
-                }}
-                className={cn(
-                  "inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
-                  "hover:bg-white/10 active:scale-[0.99]"
-                )}
-              >
-                <RefreshCcw className="h-4 w-4" /> Refresh
-              </button>
+                <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
+                  <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+                    <button
+                      onClick={() => {
+                        load();
+                        showToast("Refreshing…");
+                      }}
+                      className={cn(
+                        "inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
+                        "hover:bg-white/10 active:scale-[0.99]"
+                      )}
+                      type="button"
+                    >
+                      <RefreshCcw className="h-4 w-4" /> Refresh
+                    </button>
 
-              <a
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
-                href="/wallet"
-              >
-                <Wallet className="h-4 w-4" /> Wallet
-              </a>
+                    <a
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
+                      href="/wallet"
+                    >
+                      <Wallet className="h-4 w-4" /> Wallet
+                    </a>
 
-              <a
-                className={cn(
-                  "inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
-                  "hover:bg-white/20 active:scale-[0.99]"
-                )}
-                href="/create-order"
-              >
-                <ShoppingCart className="h-4 w-4" /> Create order
-              </a>
+                    <a
+                      className={cn(
+                        "inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
+                        "hover:bg-white/20 active:scale-[0.99]"
+                      )}
+                      href="/create-order"
+                    >
+                      <ShoppingCart className="h-4 w-4" /> Create order
+                    </a>
 
-              <a
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
-                href="/services"
-              >
-                <Layers className="h-4 w-4" /> Services
-              </a>
-            </div>
+                    <a
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
+                      href="/services"
+                    >
+                      <Layers className="h-4 w-4" /> Services
+                    </a>
+                  </div>
 
-            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
-              <button
-                onClick={() => setAutoRefresh((x) => !x)}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
-              >
-                {autoRefresh ? "Pause live" : "Resume live"}
-              </button>
+                  <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
+                    <button
+                      onClick={() => setAutoRefresh((x) => !x)}
+                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
+                      type="button"
+                    >
+                      {autoRefresh ? "Pause live" : "Resume live"}
+                    </button>
 
-              <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
-                <span className="opacity-80">Every</span>
-                <select
-                  value={refreshEvery}
-                  onChange={(e) => setRefreshEvery(Number(e.target.value))}
-                  className="bg-transparent outline-none"
-                >
-                  <option value={6}>6s</option>
-                  <option value={12}>12s</option>
-                  <option value={20}>20s</option>
-                  <option value={35}>35s</option>
-                </select>
+                    <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
+                      <span className="opacity-80">Interval</span>
+                      <select
+                        value={refreshEvery}
+                        onChange={(e) => setRefreshEvery(Number(e.target.value))}
+                        className="bg-transparent outline-none"
+                      >
+                        <option value={6}>6s</option>
+                        <option value={12}>12s</option>
+                        <option value={20}>20s</option>
+                        <option value={35}>35s</option>
+                      </select>
+                    </div>
+
+                    <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80 sm:w-[320px]">
+                      <Search className="h-4 w-4 shrink-0 opacity-80" />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search orders / top-ups…"
+                        className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-100/40"
+                      />
+                      {search ? (
+                        <button
+                          onClick={() => setSearch("")}
+                          className="rounded-lg p-1 hover:bg-white/10 active:scale-[0.98]"
+                          title="Clear"
+                          type="button"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <button
+                      onClick={() => setOnlyProblems((x) => !x)}
+                      className={cn(
+                        "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs",
+                        onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
+                        "hover:bg-white/10 active:scale-[0.99]"
+                      )}
+                      title="Show only pending/failed"
+                      type="button"
+                    >
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Problems
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80 sm:w-[320px]">
-                <Search className="h-4 w-4 shrink-0 opacity-80" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search orders / top-ups…"
-                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-100/40"
-                />
-                {search ? (
-                  <button
-                    onClick={() => setSearch("")}
-                    className="rounded-lg p-1 hover:bg-white/10 active:scale-[0.98]"
-                    title="Clear"
-                    type="button"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                ) : null}
+              <div className="mt-2 text-[11px] text-zinc-100/50">
+                Tip: Pull down at the top to refresh (mobile). iOS WebView: heavy blur disabled for smooth scrolling.
               </div>
-
-              <button
-                onClick={() => setOnlyProblems((x) => !x)}
-                className={cn(
-                  "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs",
-                  onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
-                  "hover:bg-white/10 active:scale-[0.99]"
-                )}
-                title="Show only pending/failed"
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-                Problems
-              </button>
             </div>
           </div>
         </div>
 
         {s.error ? (
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <div className="text-sm text-red-200">⚠️ {s.error}</div>
+            <div className="text-sm text-red-200"⚠️ {s.error}</div>
             <button
               onClick={() => load()}
               className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100 hover:bg-red-500/30 active:scale-[0.99]"
@@ -853,7 +898,7 @@ export default function Dashboard() {
         ) : null}
 
         <Masonry>
-          <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
+          <Card title="Wallet intelligence" right={loading ? "" : "Real-time"} icon={Wallet} className="min-h-[210px]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
@@ -866,14 +911,14 @@ export default function Dashboard() {
               </div>
 
               <div className="text-sm text-zinc-100/70">
-                Wallet funds are used instantly at checkout. Top up and place orders in seconds.
+                Funds are applied instantly at checkout. Top up your wallet and place orders in seconds.
               </div>
 
               <Divider />
 
               <div className="grid gap-2 sm:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-zinc-100/60">Spent (30d)</div>
+                  <div className="text-xs text-zinc-100/60">Spend (30 days)</div>
                   <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
@@ -881,7 +926,7 @@ export default function Dashboard() {
                   <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                  <div className="text-xs text-zinc-100/60">Health</div>
+                  <div className="text-xs text-zinc-100/60">Ops health</div>
                   <div className="mt-1 flex items-center gap-2">
                     <Chip tone={health.tone}>
                       <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
@@ -893,11 +938,7 @@ export default function Dashboard() {
           </Card>
 
           <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
-            <KpiValue
-              loading={loading}
-              value={loading ? "" : fmtInt(s.activeOrders)}
-              sub="Pending / processing orders right now."
-            />
+            <KpiValue loading={loading} value={loading ? "" : fmtInt(s.activeOrders)} sub="Orders currently in progress." />
             <Divider />
             <div className="flex flex-wrap gap-2 text-xs">
               <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
@@ -917,9 +958,7 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-xs text-zinc-100/60">Success rate</div>
-                    <div className="text-3xl font-black tracking-tight">
-                      {s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}
-                    </div>
+                    <div className="text-3xl font-black tracking-tight">{s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-zinc-100/60 text-right">Avg fulfill</div>
@@ -930,7 +969,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="text-xs text-zinc-100/60">
-                  7-day performance estimate — designed for scaling decisions.
+                  7-day performance estimate — designed for operational decision-making.
                 </div>
 
                 <div className="flex flex-wrap gap-2">
@@ -961,7 +1000,7 @@ export default function Dashboard() {
             )}
           </Card>
 
-          <Card title="Orders (7d)" right={loading ? "" : "Daily count"} className="overflow-hidden" icon={TrendingUp}>
+          <Card title="Orders (7d)" right={loading ? "" : "Daily volume"} className="overflow-hidden" icon={TrendingUp}>
             {loading ? (
               <div className="space-y-2">
                 <Skeleton className="h-9 w-40" />
@@ -971,14 +1010,14 @@ export default function Dashboard() {
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <div className="text-3xl font-black tracking-tight">{fmtInt(orders7dTotal)}</div>
-                  <div className="text-xs text-zinc-100/60">Total orders in last 7 days</div>
+                  <div className="text-xs text-zinc-100/60">Total orders in the last 7 days</div>
                 </div>
                 <MiniBars data={ordersBars} />
               </div>
             )}
           </Card>
 
-          <Card title="Top-ups (7d)" right={loading ? "" : `Daily ${currency}`} className="overflow-hidden" icon={Wallet}>
+          <Card title="Top-ups (7d)" right={loading ? "" : `Daily total (${currency})`} className="overflow-hidden" icon={Wallet}>
             {loading ? (
               <div className="space-y-2">
                 <Skeleton className="h-9 w-40" />
@@ -988,28 +1027,30 @@ export default function Dashboard() {
               <div className="flex items-end justify-between gap-4">
                 <div>
                   <div className="text-3xl font-black tracking-tight">{fmtMoney(topups7dTotal, currency)}</div>
-                  <div className="text-xs text-zinc-100/60">Total top-ups in last 7 days</div>
+                  <div className="text-xs text-zinc-100/60">Total top-ups in the last 7 days</div>
                 </div>
                 <MiniBars data={topupsBars} />
               </div>
             )}
           </Card>
 
-          <Card title="Protected dashboard" right="Legal & safe" icon={Lock}>
+          <Card title="Security & compliance" right="Trusted by design" icon={Lock}>
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <Chip tone="info">
-                  <Lock className="h-3.5 w-3.5" /> Auth required
+                  <Lock className="h-3.5 w-3.5" /> Authentication required
                 </Chip>
-                <Chip tone="warn">Abuse prevention (rate limiting)</Chip>
+                <Chip tone="warn">Abuse prevention (rate limits)</Chip>
                 <Chip tone="neutral">
-                  <FileText className="h-3.5 w-3.5" /> Policies
+                  <FileText className="h-3.5 w-3.5" /> Policy pages
                 </Chip>
               </div>
+
               <div className="text-sm text-zinc-100/70">
-                Access is restricted to authenticated users. Payments and top-ups are processed by supported providers.
-                We store only the minimum required data for account access and order processing. See policy pages for details.
+                Access is restricted to authenticated users. Top-ups are processed by supported providers. We store only the minimum data
+                required for account access and order processing. Refer to policy pages for details.
               </div>
+
               <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
                 <a className="underline hover:text-white" href="/terms">
                   Terms
@@ -1026,7 +1067,7 @@ export default function Dashboard() {
             </div>
           </Card>
 
-          <Card title="Last top-ups" right={loading ? "" : "Latest"} icon={Wallet}>
+          <Card title="Latest top-ups" right={loading ? "" : "Most recent"} icon={Wallet}>
             {loading ? (
               <div className="space-y-2">
                 <Skeleton className="h-12 w-full" />
@@ -1073,7 +1114,7 @@ export default function Dashboard() {
                         id
                           ? async () => {
                               const ok = await copyText(id);
-                              showToast(ok ? "Copied top-up ID" : "Copy failed");
+                              showToast(ok ? "Top-up ID copied" : "Copy failed");
                             }
                           : null
                       }
@@ -1082,11 +1123,11 @@ export default function Dashboard() {
                 })}
               </div>
             ) : (
-              <div className="text-sm text-zinc-100/60">No top-ups yet. Go to Wallet and top up.</div>
+              <div className="text-sm text-zinc-100/60">No top-ups yet. Open Wallet to add funds.</div>
             )}
           </Card>
 
-          <Card title="Recent orders" right={loading ? "" : "Latest"} icon={ShoppingCart}>
+          <Card title="Recent orders" right={loading ? "" : "Most recent"} icon={ShoppingCart}>
             {loading ? (
               <div className="space-y-2">
                 <Skeleton className="h-12 w-full" />
@@ -1134,7 +1175,7 @@ export default function Dashboard() {
                         id
                           ? async () => {
                               const ok = await copyText(id);
-                              showToast(ok ? "Copied order ID" : "Copy failed");
+                              showToast(ok ? "Order ID copied" : "Copy failed");
                             }
                           : null
                       }
@@ -1149,8 +1190,8 @@ export default function Dashboard() {
           </Card>
         </Masonry>
 
-        <div className="text-xs text-zinc-100/50">
-          Mobile: stacked controls + grid ✅. Desktop: masonry columns ✅. iOS WebView: heavy blur disabled ✅.
+        <div className="text-[11px] text-zinc-100/50">
+          Mobile: sticky header + stacked controls ✅. Desktop: masonry columns ✅. iOS WebView: blur reduced for smooth scroll ✅.
         </div>
       </div>
     </div>
