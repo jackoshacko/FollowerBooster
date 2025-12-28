@@ -197,6 +197,7 @@ function SidebarShell({
         mobile ? "h-[100dvh]" : "h-screen",
         "border-r border-white/10 bg-black/35 backdrop-blur-xl",
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+        "overflow-x-clip",
         collapsed ? "w-[98px]" : "w-[310px]"
       )}
     >
@@ -217,7 +218,9 @@ function SidebarShell({
               <div className="text-sm font-extrabold tracking-tight text-white truncate">
                 {title || "FollowerBooster"}
               </div>
-              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
+              <div className="text-xs text-zinc-200/60 truncate">
+                {loading ? "Loading…" : subtitle || "Authenticated"}
+              </div>
             </div>
           ) : null}
         </div>
@@ -275,7 +278,6 @@ function fmtMoney(n, cur = "EUR") {
       maximumFractionDigits: 2,
     }).format(v);
   } catch {
-    // ✅ OVO TI JE PUKLO U JEDNOJ LINIJI: falili backticks
     return `${Math.round(v * 100) / 100} ${cur}`;
   }
 }

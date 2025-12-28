@@ -60,8 +60,6 @@ export default function Topbar() {
   const [focusSearch, setFocusSearch] = useState(false);
 
   const drawerRef = useRef(null);
-  const lastBody = useRef({ overflow: "", position: "", top: "", width: "" });
-  const scrollYRef = useRef(0);
 
   function hardLogout({ redirect = true } = {}) {
     setToken("");
@@ -82,42 +80,25 @@ export default function Topbar() {
     setOpen(false);
   }, [loc.pathname]);
 
-  // ✅ iOS-safe body lock (prevents bounce + weird “must tap to scroll”)
+  // ✅ iOS-safe body lock (SIMPLE): samo overflow hidden
   useEffect(() => {
-    if (!open) return;
-
     const body = document.body;
     const html = document.documentElement;
 
-    scrollYRef.current = window.scrollY || window.pageYOffset || 0;
+    if (!open) {
+      // unlock (safety)
+      body.style.overflow = "";
+      html.style.overscrollBehavior = "";
+      return;
+    }
 
-    lastBody.current = {
-      overflow: body.style.overflow,
-      position: body.style.position,
-      top: body.style.top,
-      width: body.style.width,
-    };
-
-    // lock
+    const prevOverflow = body.style.overflow;
     body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollYRef.current}px`;
-    body.style.width = "100%";
-
-    // reduce iOS rubber band on the overlay
     html.style.overscrollBehavior = "none";
 
     return () => {
-      // unlock
-      body.style.overflow = lastBody.current.overflow || "";
-      body.style.position = lastBody.current.position || "";
-      body.style.top = lastBody.current.top || "";
-      body.style.width = lastBody.current.width || "";
-
+      body.style.overflow = prevOverflow || "";
       html.style.overscrollBehavior = "";
-
-      // restore scroll
-      window.scrollTo(0, scrollYRef.current || 0);
     };
   }, [open]);
 
@@ -131,8 +112,8 @@ export default function Topbar() {
         if (!token) throw new Error("no token");
 
         const data = await api.get("/api/me");
-
         if (!alive) return;
+
         setMe(data || null);
         if (data?.role) localStorage.setItem("role", data.role);
       } catch {
@@ -175,7 +156,7 @@ export default function Topbar() {
     };
   }, []);
 
-  // keyboard shortcuts: ESC closes, Ctrl/Cmd+K focuses search
+  // keyboard shortcuts
   useEffect(() => {
     function onKey(e) {
       if (e.key === "Escape") setOpen(false);
@@ -199,24 +180,6 @@ export default function Topbar() {
     setFocusSearch(false);
   }, [focusSearch]);
 
-  // ✅ trap horizontal drift on iOS: if user “pulls” sideways, snap back
-  useEffect(() => {
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        const x = window.scrollX || 0;
-        if (x !== 0) window.scrollTo(0, window.scrollY || 0);
-      });
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, []);
-
   const userLabel = useMemo(() => me?.email || me?.username || me?.name || "User", [me]);
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
@@ -235,8 +198,8 @@ export default function Topbar() {
 
   return (
     <>
-      {/* NOTE: overflow-x hidden + safe-area padding; also no “pt” inside header height to avoid jump */}
-      <header className="sticky top-0 z-30 w-full overflow-x-hidden">
+      {/* ✅ NEMA sticky ovde (sticky je u AppLayout) */}
+      <header className="relative z-30 w-full overflow-x-clip">
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
@@ -339,7 +302,6 @@ export default function Topbar() {
 
               {/* RIGHT */}
               <div className="flex items-center gap-2 md:gap-3 shrink-0">
-                {/* desktop actions */}
                 <div className="hidden md:flex items-center gap-2">
                   <button
                     onClick={() => nav("/wallet")}
@@ -370,7 +332,6 @@ export default function Topbar() {
                   </button>
                 </div>
 
-                {/* user pill */}
                 <div
                   className={cn(
                     "flex items-center gap-2 rounded-2xl border border-white/10",
@@ -407,7 +368,7 @@ export default function Topbar() {
               </div>
             </div>
 
-            {/* MOBILE ACTION ROW (solves: “moram gore da vidim top bar”, plus no horizontal drift) */}
+            {/* MOBILE ACTION ROW */}
             <div className="lg:hidden pb-3">
               <div
                 className={cn(
@@ -463,19 +424,13 @@ export default function Topbar() {
       {open ? (
         <div
           className="fixed inset-0 z-40 md:hidden"
-          style={{
-            // helps iOS viewport jitter
-            WebkitTransform: "translateZ(0)",
-            transform: "translateZ(0)",
-          }}
+          style={{ WebkitTransform: "translateZ(0)", transform: "translateZ(0)" }}
         >
-          {/* overlay */}
           <div
             className="absolute inset-0 bg-black/70 backdrop-blur-[2px]"
             onClick={() => setOpen(false)}
           />
 
-          {/* panel */}
           <div
             ref={drawerRef}
             className={cn(
@@ -509,4 +464,3 @@ export default function Topbar() {
     </>
   );
 }
-
