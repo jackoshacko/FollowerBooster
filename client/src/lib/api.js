@@ -47,6 +47,7 @@ export function clearAuthLocal() {
 }
 
 function redirectToLogin() {
+  if (typeof window === "undefined") return;
   if (window.location.pathname !== "/login") window.location.href = "/login";
 }
 
@@ -70,8 +71,12 @@ async function readResponse(res) {
         json = null;
       }
     } else {
+      // backend nekad vrati json bez content-type
       const t = text.trim();
-      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+      if (
+        (t.startsWith("{") && t.endsWith("}")) ||
+        (t.startsWith("[") && t.endsWith("]"))
+      ) {
         try {
           json = JSON.parse(t);
         } catch {
@@ -94,18 +99,16 @@ function looksLikeNgrokHtml(text) {
   return t.includes("<html") && t.includes("ngrok");
 }
 
-/* ================= ENV / NGROK HEADER ================= */
-// ❌ ngrok-skip-browser-warning u browseru pravi CORS preflight probleme.
-// ✅ Dozvoli ga samo u lokalnom devu, i samo ako si ti baš na localhost-u.
+/* ================= ENV / NGROK HEADER =================
+   ❌ ngrok-skip-browser-warning u production browseru pravi CORS preflight fail
+   ✅ šalji ga SAMO kad si lokalno na localhost
+======================================================== */
 const IS_BROWSER = typeof window !== "undefined";
 const HOST = IS_BROWSER ? String(window.location.hostname) : "";
-const IS_VERCEL = HOST.includes("vercel.app");
+const IS_LOCALHOST = HOST === "localhost" || HOST === "127.0.0.1";
 
 function shouldSendNgrokSkipHeader() {
-  if (!IS_BROWSER) return false;
-  if (IS_VERCEL) return false; // NEVER on vercel/prod
-  const isLocalHost = HOST === "localhost" || HOST === "127.0.0.1";
-  return isLocalHost; // only local dev
+  return IS_BROWSER && IS_LOCALHOST;
 }
 
 /* ================= CORE REQUEST (TOKEN-ONLY) ================= */
@@ -117,17 +120,12 @@ export async function request(path, options = {}) {
   const { credentials, mode, headers: extraHeaders, body, ...rest } = options;
 
   const hasBody = body !== undefined && body !== null;
-
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
   const isString = typeof body === "string";
 
   const finalBody =
-    !hasBody
-      ? undefined
-      : isForm || isBlob || isString
-      ? body
-      : JSON.stringify(body);
+    !hasBody ? undefined : (isForm || isBlob || isString) ? body : JSON.stringify(body);
 
   const headers = {
     Accept: "application/json",
@@ -141,14 +139,20 @@ export async function request(path, options = {}) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
-  const res = await fetch(apiUrl(path), {
-    ...rest,
-    method,
-    headers,
-    body: method === "GET" || method === "HEAD" ? undefined : finalBody,
-    credentials: "omit", // ✅ ALWAYS token-only
-    mode: "cors",
-  });
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      ...rest,
+      method,
+      headers,
+      body: method === "GET" || method === "HEAD" ? undefined : finalBody,
+      credentials: "omit", // ✅ ALWAYS token-only
+      mode: "cors",
+    });
+  } catch (e) {
+    // pravi “NetworkError when attempting to fetch resource.”
+    throw new Error(e?.message || "NetworkError when attempting to fetch resource.");
+  }
 
   const { json, text, contentType } = await readResponse(res);
 
@@ -166,7 +170,9 @@ export async function request(path, options = {}) {
 
   if (!res.ok) {
     const fallbackText =
-      contentType.includes("text") || contentType.includes("html") ? (text || "").slice(0, 300) : "";
+      contentType.includes("text") || contentType.includes("html")
+        ? (text || "").slice(0, 300)
+        : "";
     throw new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
   }
 
@@ -175,17 +181,47 @@ export async function request(path, options = {}) {
   return null;
 }
 
+/* plain text helper */
+export async function requestText(path, options = {}) {
+  const token = getToken();
+  const method = String(options.method || "GET").toUpperCase();
+
+  const { headers: extraHeaders, ...rest } = options;
+
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(extraHeaders || {}),
+  };
+
+  const res = await fetch(apiUrl(path), {
+    ...rest,
+    method,
+    headers,
+    credentials: "omit",
+    mode: "cors",
+  });
+
+  const text = await res.text().catch(() => "");
+
+  if (res.status === 401) {
+    clearAuthLocal();
+    redirectToLogin();
+    throw new Error("Unauthorized");
+  }
+  if (!res.ok) throw new Error(text || "Request failed");
+  return text;
+}
+
 /* ================= API WRAPPER ================= */
 function extractToken(out) {
-  return (
+  const t =
     out?.token ||
     out?.accessToken ||
     out?.access_token ||
     out?.data?.token ||
     out?.data?.accessToken ||
-    out?.data?.access_token ||
-    ""
-  );
+    out?.data?.access_token;
+  return t ? String(t) : "";
 }
 
 function extractUser(out) {
@@ -193,12 +229,18 @@ function extractUser(out) {
 }
 
 export const api = {
+  /* generic */
   get: (p) => request(p),
   post: (p, b) => request(p, { method: "POST", body: b }),
   put: (p, b) => request(p, { method: "PUT", body: b }),
   patch: (p, b) => request(p, { method: "PATCH", body: b }),
   del: (p, b) => request(p, { method: "DELETE", body: b }),
 
+  /* misc */
+  health: () => requestText("/health"),
+  root: () => request("/"),
+
+  /* auth */
   me: () => request("/api/me"),
 
   login: async (payload) => {
@@ -235,5 +277,24 @@ export const api = {
     clearAuthLocal();
     redirectToLogin();
   },
+
+  /* services */
+  servicesPublic: () => request("/services"),
+  servicesAdmin: () => request("/admin/services"),
+
+  createService: (payload) => request("/admin/services", { method: "POST", body: payload }),
+  updateService: (id, payload) => request(`/admin/services/${id}`, { method: "PUT", body: payload }),
+  toggleService: (id) => request(`/admin/services/${id}/toggle`, { method: "PATCH" }),
+
+  /* orders */
+  createOrder: (payload) => request("/orders", { method: "POST", body: payload }),
+  myOrders: () => request("/orders"),
+
+  /* wallet */
+  wallet: () => request("/wallet"),
+
+  /* paypal */
+  paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: payload }),
+  paypalCapture: (payload) => request("/payments/paypal/capture", { method: "POST", body: payload }),
 };
 
