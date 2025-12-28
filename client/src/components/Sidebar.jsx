@@ -195,7 +195,10 @@ function SidebarShell({
       className={cls(
         "relative p-4",
         mobile ? "h-[100dvh]" : "h-screen",
-        "border-r border-white/10 bg-black/35 backdrop-blur-xl",
+        // ✅ KEY FIX: mobile sidebar MUST be solid (no see-through)
+        mobile
+          ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
+          : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         "overflow-x-clip",
         collapsed ? "w-[98px]" : "w-[310px]"
@@ -260,6 +263,7 @@ function SidebarShell({
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
+        {/* ✅ keep internal scroll area */}
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
@@ -318,7 +322,6 @@ export default function Sidebar({ mobile = false, onClose }) {
     if (mobile && typeof onClose === "function") onClose();
   };
 
-  // ✅ Load /api/me (token-only)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -544,17 +547,9 @@ export default function Sidebar({ mobile = false, onClose }) {
     </div>
   );
 
+  // ✅ KEY FIX: remove the inner "Close" button (you already have X in Topbar drawer)
   const content = (
     <>
-      {typeof onClose === "function" && mobile ? (
-        <button
-          onClick={onClose}
-          className="mb-3 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100/85 hover:bg-white/10"
-        >
-          Close
-        </button>
-      ) : null}
-
       <Section title="User" icon={Shield} collapsed={collapsed}>
         <Item to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={navClick} />
         <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={navClick} />
