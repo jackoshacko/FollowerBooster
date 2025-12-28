@@ -28,6 +28,7 @@ import {
 
 import bgSmm2 from "../assets/backgroundsmm2.jpg";
 
+/* ================= helpers ================= */
 function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
@@ -101,7 +102,6 @@ async function copyText(s) {
   }
 }
 
-/** ===== status normalize (dashboard vs orders page) ===== */
 function normalizeStatus(raw) {
   const x = String(raw || "")
     .trim()
@@ -140,49 +140,64 @@ function dayKeyUTC(dateLike) {
   return `${y}-${m}-${dd}`;
 }
 
-/**
- * Premium glass card
- * - pointer-events-none on ALL background layers => iOS scroll never gets blocked
- * - blur only when supported, and we disable heavy blur on iOS to avoid "sticky" scroll feel
- */
+/* ================= UI building blocks ================= */
+
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !window.MSStream;
+
+// WhatsApp / Instagram in-app browsers are iOS WebViews too
+const IS_WEBVIEW =
+  typeof navigator !== "undefined" &&
+  /(FBAN|FBAV|Instagram|Line|WhatsApp)/i.test(navigator.userAgent || "");
+
+// On iOS webviews, heavy backdrop blur causes scroll jank + “tap then scroll”
+const DISABLE_HEAVY_BLUR = IS_IOS && IS_WEBVIEW;
+
 function Card({ title, right, icon: Icon, children, className }) {
   return (
-    <div
+    <section
       className={cn(
-        "group relative overflow-hidden rounded-2xl",
-        "border border-white/10",
+        "relative overflow-hidden rounded-2xl border border-white/10",
         "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_10px_30px_rgba(0,0,0,0.45)]",
-        "transition-colors duration-200 hover:border-white/15",
+        "bg-black/30",
+        "will-change-auto",
         className
       )}
     >
-      {/* background layers NEVER capture touch/scroll */}
+      {/* Background layers must never capture touch */}
       <div className="pointer-events-none absolute inset-0">
         <div
-          className="absolute inset-0 bg-cover bg-center opacity-[0.22] transition-opacity duration-200 group-hover:opacity-[0.28]"
+          className="absolute inset-0 bg-cover bg-center opacity-[0.22]"
           style={{ backgroundImage: `url(${bgSmm2})` }}
         />
-        <div className="ios-glass-fix absolute inset-0 bg-black/40 supports-[backdrop-filter]:bg-black/30 supports-[backdrop-filter]:backdrop-blur-xl" />
+        {/* Blur only where safe; WebView gets a solid glass fallback */}
+        {DISABLE_HEAVY_BLUR ? (
+          <div className="absolute inset-0 bg-black/55" />
+        ) : (
+          <div className="absolute inset-0 bg-black/40 supports-[backdrop-filter]:bg-black/25 supports-[backdrop-filter]:backdrop-blur-xl" />
+        )}
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-black/35" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-transparent to-black/30" />
       </div>
 
       <div className="relative p-4">
-        <div className="mb-2 flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
+        <header className="mb-2 flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
             {Icon ? (
-              <div className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/90">
+              <div className="shrink-0 rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/90">
                 <Icon className="h-4 w-4" />
               </div>
             ) : null}
-            <div className="text-sm text-zinc-200/80">{title}</div>
+            <div className="min-w-0 truncate text-sm text-zinc-200/80">{title}</div>
           </div>
-          {right ? <div className="text-xs text-zinc-200/60">{right}</div> : null}
-        </div>
+          {right ? <div className="shrink-0 text-xs text-zinc-200/60">{right}</div> : null}
+        </header>
 
         <div className="text-white">{children}</div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -256,7 +271,7 @@ function MiniBars({ data, height = 52 }) {
         return (
           <div
             key={i}
-            className="w-2.5 rounded-t bg-white/15 hover:bg-white/25 transition"
+            className="w-2.5 rounded-t bg-white/15 transition active:opacity-80"
             style={{ height: h }}
             title={`${n}`}
           />
@@ -267,8 +282,19 @@ function MiniBars({ data, height = 52 }) {
 }
 
 function RowItem({ left, right, onCopy, onOpen }) {
+  // Blur here is tiny, but on iOS WebView we still keep it safe.
+  const glassClass = DISABLE_HEAVY_BLUR
+    ? "bg-white/5"
+    : "bg-white/5 supports-[backdrop-filter]:backdrop-blur-md";
+
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 ios-glass-fix supports-[backdrop-filter]:backdrop-blur-xl transition hover:bg-white/10">
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3 rounded-2xl border border-white/10 p-3 transition",
+        glassClass,
+        "hover:bg-white/10"
+      )}
+    >
       <div className="min-w-0">{left}</div>
       <div className="flex shrink-0 items-center gap-2">
         {right ? <div className="text-sm font-semibold text-white">{right}</div> : null}
@@ -298,7 +324,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
 }
 
 /**
- * MOBILE = GRID (no columns) ✅ best iOS behavior
+ * MOBILE = GRID (no columns) ✅
  * DESKTOP = CSS columns masonry ✅
  */
 function Masonry({ children }) {
@@ -306,7 +332,7 @@ function Masonry({ children }) {
     <>
       <div className="grid gap-4 md:hidden">{children}</div>
 
-      <div className="hidden md:block masonry">
+      <div className="hidden md:block masonry gap-4">
         {React.Children.map(children, (child, idx) => (
           <div key={idx} className="mb-4 break-inside-avoid">
             {child}
@@ -316,6 +342,8 @@ function Masonry({ children }) {
     </>
   );
 }
+
+/* ================= state ================= */
 
 const initial = {
   loading: true,
@@ -357,7 +385,6 @@ export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
 
-  // live change signature
   const lastSig = useRef("");
 
   function showToast(msg) {
@@ -366,7 +393,6 @@ export default function Dashboard() {
     toastTimer.current = setTimeout(() => setToast(""), 1400);
   }
 
-  /** fallback: compute live metrics from /orders */
   async function buildFallbackFromOrders(currencyGuess = "EUR") {
     const list = await api.get("/orders").catch(() => []);
     const orders = Array.isArray(list) ? list : [];
@@ -436,7 +462,8 @@ export default function Dashboard() {
       const computedCompleted = safeNum(completedOrders ?? fbCounts.completed ?? 0);
       const computedFailed = safeNum(failedOrders ?? fbCounts.failed ?? 0);
 
-      const computedActive = d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
+      const computedActive =
+        d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
 
       const mergedSeries7d = {
         labels:
@@ -447,10 +474,12 @@ export default function Dashboard() {
           Array.isArray(series7d?.orders) && series7d.orders.length === 7
             ? series7d.orders
             : fallback?.series7dOrders?.orders || [0, 0, 0, 0, 0, 0, 0],
-        topups: Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
+        topups:
+          Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
       };
 
-      const lastOrders = Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
+      const lastOrders =
+        Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
 
       const next = {
         loading: false,
@@ -481,7 +510,6 @@ export default function Dashboard() {
         topServices: d.topServices ?? s.topServices ?? null,
       };
 
-      // live pulse toast only on silent refresh
       const sig = `${next.balance}|${next.activeOrders}|${next.pendingOrders}|${next.processingOrders}|${next.completedOrders}|${next.failedOrders}`;
       if (lastSig.current && lastSig.current !== sig && silent) showToast("Live update");
       lastSig.current = sig;
@@ -498,7 +526,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     let alive = true;
-
     (async () => {
       if (!alive) return;
       await load();
@@ -534,8 +561,15 @@ export default function Dashboard() {
   const currency = s.currency || "EUR";
   const loading = s.loading;
 
-  const ordersBars = useMemo(() => (s.series7d?.orders?.length ? s.series7d.orders : [0, 0, 0, 0, 0, 0, 0]), [s.series7d]);
-  const topupsBars = useMemo(() => (s.series7d?.topups?.length ? s.series7d.topups : [0, 0, 0, 0, 0, 0, 0]), [s.series7d]);
+  const ordersBars = useMemo(() => {
+    const arr = s.series7d?.orders || [];
+    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
+  }, [s.series7d]);
+
+  const topupsBars = useMemo(() => {
+    const arr = s.series7d?.topups || [];
+    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
+  }, [s.series7d]);
 
   const orders7dTotal = useMemo(() => ordersBars.reduce((a, b) => a + safeNum(b, 0), 0), [ordersBars]);
   const topups7dTotal = useMemo(() => topupsBars.reduce((a, b) => a + safeNum(b, 0), 0), [topupsBars]);
@@ -589,7 +623,12 @@ export default function Dashboard() {
   }, [s.lastUpdatedAt]);
 
   const totalOrdersSnapshot = useMemo(() => {
-    return safeNum(s.completedOrders, 0) + safeNum(s.failedOrders, 0) + safeNum(s.pendingOrders, 0) + safeNum(s.processingOrders, 0);
+    return (
+      safeNum(s.completedOrders, 0) +
+      safeNum(s.failedOrders, 0) +
+      safeNum(s.pendingOrders, 0) +
+      safeNum(s.processingOrders, 0)
+    );
   }, [s.completedOrders, s.failedOrders, s.pendingOrders, s.processingOrders]);
 
   const filteredOrders = useMemo(() => {
@@ -619,15 +658,33 @@ export default function Dashboard() {
   }, [s.lastTopups, search]);
 
   return (
-    <div className="dashboard-root space-y-5 pb-[env(safe-area-inset-bottom)]">
+    <div
+      className={cn(
+        "dashboard-root",
+        "w-full",
+        "overflow-x-hidden", // ✅ stops iOS “zoom/pan sideways” caused by tiny overflow
+        "pb-[max(env(safe-area-inset-bottom),16px)]"
+      )}
+    >
       <style>{`
+        /* ===== Global mobile safety (prevents iOS weird zoom/layout shifts) ===== */
+        :root { -webkit-text-size-adjust: 100%; }
+        html, body { width: 100%; overflow-x: hidden; }
+
+        /* Smooth + correct scrolling on iOS */
+        .dashboard-scroll {
+          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y;
+          overscroll-behavior-y: contain;
+        }
+
         /* Desktop masonry only */
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
 
-        /* iOS Safari: avoid auto-zoom on inputs (font-size must be >= 16px) */
+        /* iOS Safari/WebView: avoid auto-zoom on inputs (must be >=16px) */
         @media (max-width: 767px){
           .mobile-nozoom input,
           .mobile-nozoom select,
@@ -637,446 +694,464 @@ export default function Dashboard() {
           }
         }
 
-        /* iOS blur/perf: disable heavy blur on iOS (prevents "tap then scroll" feeling) */
-        @supports (-webkit-touch-callout: none){
-          .ios-glass-fix {
-            -webkit-backdrop-filter: none !important;
-            backdrop-filter: none !important;
-          }
-        }
-
-        /* Small UX polish on iOS */
-        .dashboard-root {
-          -webkit-text-size-adjust: 100%;
-          touch-action: pan-y;
-        }
+        /* Don’t let any element force horizontal overflow */
+        .no-x-overflow * { max-width: 100%; }
       `}</style>
 
       {toast ? (
-        <div className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 supports-[backdrop-filter]:backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
+        <div className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/70 px-4 py-2 text-sm text-zinc-100 shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
           {toast}
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between mobile-nozoom">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
-            <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
-              <Sparkles className="h-3.5 w-3.5" />
-              {autoRefresh ? "Live" : "Paused"}
-            </Chip>
-            <Chip tone="violet">
-              <Zap className="h-3.5 w-3.5" /> 2050 Mode
-            </Chip>
-            <Chip tone="info">
-              <Lock className="h-3.5 w-3.5" /> Protected
-            </Chip>
+      {/* ✅ Centered container; prevents “zoomed” feel on mobile */}
+      <div className="dashboard-scroll no-x-overflow mx-auto w-full max-w-[1200px] space-y-5 px-4 sm:px-5">
+        {/* ===== Header ===== */}
+        <div className="mobile-nozoom flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
+              <Chip tone={autoRefresh ? "ok" : "neutral"} className="ml-1">
+                <Sparkles className="h-3.5 w-3.5" />
+                {autoRefresh ? "Live" : "Paused"}
+              </Chip>
+              <Chip tone="violet">
+                <Zap className="h-3.5 w-3.5" /> 2050 Mode
+              </Chip>
+              <Chip tone="info">
+                <Lock className="h-3.5 w-3.5" /> Protected
+              </Chip>
+            </div>
+
+            <div className="mt-1 text-sm text-zinc-100/70">
+              Balance, orders, spend, ops & intelligence — ultra-clean operations panel.
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Chip tone="info">
+                <Wallet className="h-3.5 w-3.5" /> Wallet-ready
+              </Chip>
+              <Chip tone={health.tone}>
+                <ShieldCheck className="h-3.5 w-3.5" /> {health.msg} (risk {health.riskScore})
+              </Chip>
+              <Chip tone="neutral">{realtimeLabel}</Chip>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">{statusBadges}</div>
           </div>
 
-          <div className="mt-1 text-sm text-zinc-100/70">
-            Balance, orders, spend, ops & intelligence — ultra-clean operations panel.
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Chip tone="info">
-              <Wallet className="h-3.5 w-3.5" /> Wallet-ready
-            </Chip>
-            <Chip tone={health.tone}>
-              <ShieldCheck className="h-3.5 w-3.5" /> {health.msg} (risk {health.riskScore})
-            </Chip>
-            <Chip tone="neutral">{realtimeLabel}</Chip>
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">{statusBadges}</div>
-        </div>
-
-        <div className="flex flex-col items-stretch gap-2 lg:items-end">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => {
-                load();
-                showToast("Refreshing…");
-              }}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
-                "hover:bg-white/10 active:scale-[0.99]",
-                "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_12px_30px_rgba(0,0,0,0.35)]"
-              )}
-            >
-              <RefreshCcw className="h-4 w-4" /> Refresh
-            </button>
-
-            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]" href="/wallet">
-              <Wallet className="h-4 w-4" /> Wallet
-            </a>
-
-            <a
-              className={cn(
-                "inline-flex items-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
-                "hover:bg-white/20 active:scale-[0.99]",
-                "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_40px_rgba(56,189,248,0.16)]"
-              )}
-              href="/create-order"
-            >
-              <ShoppingCart className="h-4 w-4" /> Create order
-            </a>
-
-            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]" href="/services">
-              <Layers className="h-4 w-4" /> Services
-            </a>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
-            <button
-              onClick={() => setAutoRefresh((x) => !x)}
-              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
-            >
-              {autoRefresh ? "Pause live" : "Resume live"}
-            </button>
-
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-100/80">
-              <span className="opacity-80">Every</span>
-              <select
-                value={refreshEvery}
-                onChange={(e) => setRefreshEvery(Number(e.target.value))}
-                className="bg-transparent outline-none"
+          {/* ✅ Mobile-safe controls: stacked on small screens (no horizontal overflow) */}
+          <div className="flex w-full flex-col gap-2 lg:w-auto lg:items-end">
+            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+              <button
+                onClick={() => {
+                  load();
+                  showToast("Refreshing…");
+                }}
+                className={cn(
+                  "inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
+                  "hover:bg-white/10 active:scale-[0.99]"
+                )}
               >
-                <option value={6}>6s</option>
-                <option value={12}>12s</option>
-                <option value={20}>20s</option>
-                <option value={35}>35s</option>
-              </select>
+                <RefreshCcw className="h-4 w-4" /> Refresh
+              </button>
+
+              <a
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
+                href="/wallet"
+              >
+                <Wallet className="h-4 w-4" /> Wallet
+              </a>
+
+              <a
+                className={cn(
+                  "inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
+                  "hover:bg-white/20 active:scale-[0.99]"
+                )}
+                href="/create-order"
+              >
+                <ShoppingCart className="h-4 w-4" /> Create order
+              </a>
+
+              <a
+                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
+                href="/services"
+              >
+                <Layers className="h-4 w-4" /> Services
+              </a>
             </div>
 
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-100/80">
-              <Search className="h-4 w-4 opacity-80" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search orders / top-ups…"
-                className="w-56 bg-transparent outline-none placeholder:text-zinc-100/40"
-              />
-              {search ? (
-                <button onClick={() => setSearch("")} className="rounded-lg p-1 hover:bg-white/10" title="Clear">
-                  <X className="h-4 w-4" />
-                </button>
-              ) : null}
-            </div>
+            <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
+              <button
+                onClick={() => setAutoRefresh((x) => !x)}
+                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
+              >
+                {autoRefresh ? "Pause live" : "Resume live"}
+              </button>
 
-            <button
-              onClick={() => setOnlyProblems((x) => !x)}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-1.5 text-xs active:scale-[0.99]",
-                onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
-                "hover:bg-white/10"
-              )}
-              title="Show only pending/failed"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-              Problems
-            </button>
+              <div className="flex items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
+                <span className="opacity-80">Every</span>
+                <select
+                  value={refreshEvery}
+                  onChange={(e) => setRefreshEvery(Number(e.target.value))}
+                  className="bg-transparent outline-none"
+                >
+                  <option value={6}>6s</option>
+                  <option value={12}>12s</option>
+                  <option value={20}>20s</option>
+                  <option value={35}>35s</option>
+                </select>
+              </div>
+
+              <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80 sm:w-[320px]">
+                <Search className="h-4 w-4 shrink-0 opacity-80" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search orders / top-ups…"
+                  className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-zinc-100/40"
+                />
+                {search ? (
+                  <button
+                    onClick={() => setSearch("")}
+                    className="rounded-lg p-1 hover:bg-white/10 active:scale-[0.98]"
+                    title="Clear"
+                    type="button"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+
+              <button
+                onClick={() => setOnlyProblems((x) => !x)}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs",
+                  onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
+                  "hover:bg-white/10 active:scale-[0.99]"
+                )}
+                title="Show only pending/failed"
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                Problems
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {s.error ? (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 supports-[backdrop-filter]:backdrop-blur-xl">
-          <div className="text-sm text-red-200">⚠️ {s.error}</div>
-          <button onClick={() => load()} className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100 hover:bg-red-500/30">
-            Retry
-          </button>
-        </div>
-      ) : null}
+        {s.error ? (
+          <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
+            <div className="text-sm text-red-200">⚠️ {s.error}</div>
+            <button
+              onClick={() => load()}
+              className="mt-3 rounded-xl bg-red-500/20 px-3 py-2 text-sm text-red-100 hover:bg-red-500/30 active:scale-[0.99]"
+              type="button"
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
 
-      <Masonry>
-        <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
+        <Masonry>
+          <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
+                <div className="flex flex-wrap gap-2">
+                  <Chip tone="info">
+                    <Boxes className="h-3.5 w-3.5" /> Orders snapshot: {fmtInt(totalOrdersSnapshot)}
+                  </Chip>
+                  <Chip tone="neutral">Currency: {currency}</Chip>
+                </div>
+              </div>
+
+              <div className="text-sm text-zinc-100/70">
+                Wallet funds are used instantly at checkout. Top up and place orders in seconds.
+              </div>
+
+              <Divider />
+
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs text-zinc-100/60">Spent (30d)</div>
+                  <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs text-zinc-100/60">All-time spend</div>
+                  <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                  <div className="text-xs text-zinc-100/60">Health</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <Chip tone={health.tone}>
+                      <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
+                    </Chip>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
+            <KpiValue
+              loading={loading}
+              value={loading ? "" : fmtInt(s.activeOrders)}
+              sub="Pending / processing orders right now."
+            />
+            <Divider />
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
+              <Chip tone="info">Processing {fmtInt(s.processingOrders)}</Chip>
+              <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
+            </div>
+          </Card>
+
+          <Card title="Quality (7d)" right={loading ? "" : "Success + speed"} icon={ShieldCheck}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-7 w-24" />
+                <Skeleton className="h-3 w-44" />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-zinc-100/60">Success rate</div>
+                    <div className="text-3xl font-black tracking-tight">
+                      {s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-zinc-100/60 text-right">Avg fulfill</div>
+                    <div className="text-3xl font-black tracking-tight text-right">
+                      {s.avgFulfillMins7d == null ? "—" : `${Math.round(s.avgFulfillMins7d)}m`}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-zinc-100/60">
+                  7-day performance estimate — designed for scaling decisions.
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Chip tone={health.tone}>{health.msg}</Chip>
+                  <Chip tone="neutral">Updated: {relTime(s.lastUpdatedAt)}</Chip>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Completed" right={loading ? "" : "Snapshot"} icon={CheckCircle2}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-7 w-28" />
+                <Skeleton className="h-3 w-44" />
+              </div>
+            ) : (
+              <>
+                <div className="text-3xl font-black tracking-tight">{fmtInt(s.completedOrders)}</div>
+                <div className="mt-1 text-xs text-zinc-100/60">Completed orders.</div>
+                <Divider />
+                <div className="flex flex-wrap gap-2">
+                  <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
+                  <Chip tone="info">In progress {fmtInt(s.pendingOrders + s.processingOrders)}</Chip>
+                  <Chip tone="neutral">Total {fmtInt(totalOrdersSnapshot)}</Chip>
+                </div>
+              </>
+            )}
+          </Card>
+
+          <Card title="Orders (7d)" right={loading ? "" : "Daily count"} className="overflow-hidden" icon={TrendingUp}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-9 w-40" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : (
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <div className="text-3xl font-black tracking-tight">{fmtInt(orders7dTotal)}</div>
+                  <div className="text-xs text-zinc-100/60">Total orders in last 7 days</div>
+                </div>
+                <MiniBars data={ordersBars} />
+              </div>
+            )}
+          </Card>
+
+          <Card title="Top-ups (7d)" right={loading ? "" : `Daily ${currency}`} className="overflow-hidden" icon={Wallet}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-9 w-40" />
+                <Skeleton className="h-10 w-full" />
+              </div>
+            ) : (
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <div className="text-3xl font-black tracking-tight">{fmtMoney(topups7dTotal, currency)}</div>
+                  <div className="text-xs text-zinc-100/60">Total top-ups in last 7 days</div>
+                </div>
+                <MiniBars data={topupsBars} />
+              </div>
+            )}
+          </Card>
+
+          <Card title="Protected dashboard" right="Legal & safe" icon={Lock}>
+            <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
                 <Chip tone="info">
-                  <Boxes className="h-3.5 w-3.5" /> Orders snapshot: {fmtInt(totalOrdersSnapshot)}
+                  <Lock className="h-3.5 w-3.5" /> Auth required
                 </Chip>
-                <Chip tone="neutral">Currency: {currency}</Chip>
+                <Chip tone="warn">Abuse prevention (rate limiting)</Chip>
+                <Chip tone="neutral">
+                  <FileText className="h-3.5 w-3.5" /> Policies
+                </Chip>
+              </div>
+              <div className="text-sm text-zinc-100/70">
+                Access is restricted to authenticated users. Payments and top-ups are processed by supported providers.
+                We store only the minimum required data for account access and order processing. See policy pages for details.
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
+                <a className="underline hover:text-white" href="/terms">
+                  Terms
+                </a>
+                <a className="underline hover:text-white" href="/privacy">
+                  Privacy
+                </a>
+                <a className="underline hover:text-white" href="/refunds">
+                  Refunds
+                </a>
+                <span>•</span>
+                <span>Secure-by-default ✅</span>
               </div>
             </div>
+          </Card>
 
-            <div className="text-sm text-zinc-100/70">
-              Wallet funds are used instantly at checkout. Top up and place orders within seconds.
-            </div>
-
-            <Divider />
-
-            <div className="grid gap-2 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">Spent (30d)</div>
-                <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
+          <Card title="Last top-ups" right={loading ? "" : "Latest"} icon={Wallet}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">All-time spend</div>
-                <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">System health</div>
-                <div className="mt-1 flex items-center gap-2">
-                  <Chip tone={health.tone}>
-                    <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
-                  </Chip>
-                </div>
-              </div>
-            </div>
-          </div>
-        </Card>
+            ) : filteredTopups.length ? (
+              <div className="space-y-2">
+                {filteredTopups.slice(0, 10).map((t) => {
+                  const id = t.id || t._id;
+                  const provider = t.provider || "topup";
+                  const status = String(t.status || "—");
+                  const created = t.createdAt || t.created_at || t.time;
+                  const amount = safeNum(t.amount, 0);
+                  const cur = t.currency || currency;
 
-        <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
-          <KpiValue loading={loading} value={loading ? "" : fmtInt(s.activeOrders)} sub="Pending/processing orders right now." />
-          <Divider />
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
-            <Chip tone="info">Processing {fmtInt(s.processingOrders)}</Chip>
-            <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
-          </div>
-        </Card>
+                  const st = status.toLowerCase();
+                  const tone =
+                    st.includes("confirm") || st.includes("success")
+                      ? "ok"
+                      : st.includes("pend")
+                      ? "warn"
+                      : st.includes("fail")
+                      ? "bad"
+                      : "neutral";
 
-        <Card title="Quality (7d)" right={loading ? "" : "Success & speed"} icon={ShieldCheck}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-7 w-24" />
-              <Skeleton className="h-3 w-44" />
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs text-zinc-100/60">Success rate</div>
-                  <div className="text-3xl font-black tracking-tight">{s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-zinc-100/60 text-right">Avg fulfilment</div>
-                  <div className="text-3xl font-black tracking-tight text-right">{s.avgFulfillMins7d == null ? "—" : `${Math.round(s.avgFulfillMins7d)}m`}</div>
-                </div>
-              </div>
-
-              <div className="text-xs text-zinc-100/60">
-                Rolling 7-day performance indicators. Useful for scale and capacity decisions.
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Chip tone={health.tone}>{health.msg}</Chip>
-                <Chip tone="neutral">Updated: {relTime(s.lastUpdatedAt)}</Chip>
-              </div>
-            </div>
-          )}
-        </Card>
-
-        <Card title="Completed" right={loading ? "" : "Snapshot"} icon={CheckCircle2}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-7 w-28" />
-              <Skeleton className="h-3 w-44" />
-            </div>
-          ) : (
-            <>
-              <div className="text-3xl font-black tracking-tight">{fmtInt(s.completedOrders)}</div>
-              <div className="mt-1 text-xs text-zinc-100/60">Completed orders.</div>
-              <Divider />
-              <div className="flex flex-wrap gap-2">
-                <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
-                <Chip tone="info">In progress {fmtInt(s.pendingOrders + s.processingOrders)}</Chip>
-                <Chip tone="neutral">Total {fmtInt(totalOrdersSnapshot)}</Chip>
-              </div>
-            </>
-          )}
-        </Card>
-
-        <Card title="Orders (7d)" right={loading ? "" : "Daily count"} className="overflow-hidden" icon={TrendingUp}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-9 w-40" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <div className="text-3xl font-black tracking-tight">{fmtInt(orders7dTotal)}</div>
-                <div className="text-xs text-zinc-100/60">Total orders in the last 7 days</div>
-              </div>
-              <MiniBars data={ordersBars} />
-            </div>
-          )}
-        </Card>
-
-        <Card title="Top-ups (7d)" right={loading ? "" : `Daily ${currency}`} className="overflow-hidden" icon={Wallet}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-9 w-40" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <div className="text-3xl font-black tracking-tight">{fmtMoney(topups7dTotal, currency)}</div>
-                <div className="text-xs text-zinc-100/60">Total top-ups in the last 7 days</div>
-              </div>
-              <MiniBars data={topupsBars} />
-            </div>
-          )}
-        </Card>
-
-        <Card title="Security & compliance" right="Policy-first" icon={Lock}>
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <Chip tone="info">
-                <Lock className="h-3.5 w-3.5" /> Authentication required
-              </Chip>
-              <Chip tone="warn">Abuse prevention (rate limiting)</Chip>
-              <Chip tone="neutral">
-                <FileText className="h-3.5 w-3.5" /> Policies
-              </Chip>
-            </div>
-
-            <div className="text-sm text-zinc-100/70">
-              Access to this panel is restricted to authenticated users. Payments and top-ups are processed by supported providers.
-              We store only the minimum required data for account access and order processing. For full details, see our policy pages.
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
-              <a className="underline hover:text-white" href="/terms">Terms</a>
-              <a className="underline hover:text-white" href="/privacy">Privacy</a>
-              <a className="underline hover:text-white" href="/refunds">Refunds</a>
-              <span>•</span>
-              <span>Mobile grid ✅</span>
-              <span>Desktop masonry ✅</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card title="Last top-ups" right={loading ? "" : "Latest"} icon={Wallet}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          ) : filteredTopups.length ? (
-            <div className="space-y-2">
-              {filteredTopups.slice(0, 10).map((t) => {
-                const id = t.id || t._id;
-                const provider = t.provider || "topup";
-                const status = String(t.status || "—");
-                const created = t.createdAt || t.created_at || t.time;
-                const amount = safeNum(t.amount, 0);
-                const cur = t.currency || currency;
-
-                const st = status.toLowerCase();
-                const tone =
-                  st.includes("confirm") || st.includes("success")
-                    ? "ok"
-                    : st.includes("pend")
-                    ? "warn"
-                    : st.includes("fail")
-                    ? "bad"
-                    : "neutral";
-
-                return (
-                  <RowItem
-                    key={String(id)}
-                    left={
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Chip tone="neutral">{provider}</Chip>
-                          <Chip tone={tone}>{status}</Chip>
-                          <span className="text-xs text-zinc-100/60">{created ? relTime(created) : ""}</span>
+                  return (
+                    <RowItem
+                      key={String(id)}
+                      left={
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Chip tone="neutral">{provider}</Chip>
+                            <Chip tone={tone}>{status}</Chip>
+                            <span className="text-xs text-zinc-100/60">{created ? relTime(created) : ""}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-100/60">
+                            ID: <span className="text-zinc-100/80">{shortId(id)}</span>
+                          </div>
                         </div>
-                        <div className="mt-1 text-xs text-zinc-100/60">
-                          ID: <span className="text-zinc-100/80">{shortId(id)}</span>
+                      }
+                      right={`+ ${fmtMoney(amount, cur)}`}
+                      onCopy={
+                        id
+                          ? async () => {
+                              const ok = await copyText(id);
+                              showToast(ok ? "Copied top-up ID" : "Copy failed");
+                            }
+                          : null
+                      }
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-100/60">No top-ups yet. Go to Wallet and top up.</div>
+            )}
+          </Card>
+
+          <Card title="Recent orders" right={loading ? "" : "Latest"} icon={ShoppingCart}>
+            {loading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+                <Skeleton className="h-12 w-full" />
+              </div>
+            ) : filteredOrders.length ? (
+              <div className="space-y-2">
+                {filteredOrders.slice(0, 10).map((o) => {
+                  const id = o.id || o._id;
+                  const status = String(o.status || "—").toLowerCase();
+                  const created = o.createdAt || o.created_at || o.time;
+                  const serviceName = o.serviceName || o.service?.name || o.name || "Service";
+                  const qty = o.quantity ?? o.qty ?? "—";
+                  const total = o.total ?? o.price ?? 0;
+                  const link = o.link || o.url || "";
+
+                  const tone =
+                    status === "completed" || status === "success"
+                      ? "ok"
+                      : status === "processing"
+                      ? "info"
+                      : status === "pending"
+                      ? "warn"
+                      : status === "failed"
+                      ? "bad"
+                      : "neutral";
+
+                  return (
+                    <RowItem
+                      key={String(id)}
+                      left={
+                        <div className="min-w-0">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Chip tone={tone}>{status}</Chip>
+                            <span className="min-w-0 truncate text-sm text-zinc-100">{serviceName}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-100/60">
+                            {created ? relTime(created) : ""} • qty {qty} • ID {shortId(id)}
+                          </div>
                         </div>
-                      </div>
-                    }
-                    right={`+ ${fmtMoney(amount, cur)}`}
-                    onCopy={
-                      id
-                        ? async () => {
-                            const ok = await copyText(id);
-                            showToast(ok ? "Copied top-up id" : "Copy failed");
-                          }
-                        : null
-                    }
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-zinc-100/60">No top-ups yet. Go to Wallet and top up.</div>
-          )}
-        </Card>
+                      }
+                      right={fmtMoney(total, currency)}
+                      onCopy={
+                        id
+                          ? async () => {
+                              const ok = await copyText(id);
+                              showToast(ok ? "Copied order ID" : "Copy failed");
+                            }
+                          : null
+                      }
+                      onOpen={link ? () => window.open(link, "_blank", "noopener,noreferrer") : null}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-zinc-100/60">No orders yet. Create your first order.</div>
+            )}
+          </Card>
+        </Masonry>
 
-        <Card title="Recent orders" right={loading ? "" : "Latest"} icon={ShoppingCart}>
-          {loading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          ) : filteredOrders.length ? (
-            <div className="space-y-2">
-              {filteredOrders.slice(0, 10).map((o) => {
-                const id = o.id || o._id;
-                const status = String(o.status || "—").toLowerCase();
-                const created = o.createdAt || o.created_at || o.time;
-                const serviceName = o.serviceName || o.service?.name || o.name || "Service";
-                const qty = o.quantity ?? o.qty ?? "—";
-                const total = o.total ?? o.price ?? 0;
-                const link = o.link || o.url || "";
-
-                const tone =
-                  status === "completed" || status === "success"
-                    ? "ok"
-                    : status === "processing"
-                    ? "info"
-                    : status === "pending"
-                    ? "warn"
-                    : status === "failed"
-                    ? "bad"
-                    : "neutral";
-
-                return (
-                  <RowItem
-                    key={String(id)}
-                    left={
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Chip tone={tone}>{status}</Chip>
-                          <span className="truncate text-sm text-zinc-100">{serviceName}</span>
-                        </div>
-                        <div className="mt-1 text-xs text-zinc-100/60">
-                          {created ? relTime(created) : ""} • qty {qty} • ID {shortId(id)}
-                        </div>
-                      </div>
-                    }
-                    right={fmtMoney(total, currency)}
-                    onCopy={
-                      id
-                        ? async () => {
-                            const ok = await copyText(id);
-                            showToast(ok ? "Copied order id" : "Copy failed");
-                          }
-                        : null
-                    }
-                    onOpen={link ? () => window.open(link, "_blank", "noopener,noreferrer") : null}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-zinc-100/60">No orders yet. Create your first order.</div>
-          )}
-        </Card>
-      </Masonry>
-
-      <div className="text-xs text-zinc-100/50">
-        Mobile: grid ✅ (no columns; best iOS scroll). Desktop: masonry ✅. iOS input zoom prevented (16px inputs).
+        <div className="text-xs text-zinc-100/50">
+          Mobile: stacked controls + grid ✅. Desktop: masonry columns ✅. iOS WebView: heavy blur disabled ✅.
+        </div>
       </div>
     </div>
   );
