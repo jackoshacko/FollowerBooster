@@ -1,3 +1,4 @@
+// client/src/pages/Dashboard.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
 import {
@@ -141,8 +142,8 @@ function dayKeyUTC(dateLike) {
 
 /**
  * Premium glass card
- * - iOS-safe: blur only if supported, fallback to solid glass
- * - no hover scale on touch devices (prevents weird "tap to scroll" feeling)
+ * - pointer-events-none on ALL background layers => iOS scroll never gets blocked
+ * - blur only when supported, and we disable heavy blur on iOS to avoid "sticky" scroll feel
  */
 function Card({ title, right, icon: Icon, children, className }) {
   return (
@@ -151,20 +152,17 @@ function Card({ title, right, icon: Icon, children, className }) {
         "group relative overflow-hidden rounded-2xl",
         "border border-white/10",
         "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_10px_30px_rgba(0,0,0,0.45)]",
-        "transition-transform duration-200",
-        "hover:border-white/15",
-        "touch:transition-none",
+        "transition-colors duration-200 hover:border-white/15",
         className
       )}
     >
-      {/* background layers never block touch/scroll */}
+      {/* background layers NEVER capture touch/scroll */}
       <div className="pointer-events-none absolute inset-0">
         <div
           className="absolute inset-0 bg-cover bg-center opacity-[0.22] transition-opacity duration-200 group-hover:opacity-[0.28]"
           style={{ backgroundImage: `url(${bgSmm2})` }}
         />
-        {/* iOS blur fallback (only when supported) */}
-        <div className="absolute inset-0 bg-black/40 supports-[backdrop-filter]:bg-black/30 supports-[backdrop-filter]:backdrop-blur-xl" />
+        <div className="ios-glass-fix absolute inset-0 bg-black/40 supports-[backdrop-filter]:bg-black/30 supports-[backdrop-filter]:backdrop-blur-xl" />
         <div className="absolute inset-0 bg-gradient-to-b from-white/5 via-transparent to-black/35" />
         <div className="absolute inset-0 bg-gradient-to-r from-black/30 via-transparent to-black/30" />
       </div>
@@ -270,7 +268,7 @@ function MiniBars({ data, height = 52 }) {
 
 function RowItem({ left, right, onCopy, onOpen }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 supports-[backdrop-filter]:backdrop-blur-xl transition hover:bg-white/10">
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3 ios-glass-fix supports-[backdrop-filter]:backdrop-blur-xl transition hover:bg-white/10">
       <div className="min-w-0">{left}</div>
       <div className="flex shrink-0 items-center gap-2">
         {right ? <div className="text-sm font-semibold text-white">{right}</div> : null}
@@ -278,7 +276,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
           <button
             type="button"
             onClick={onCopy}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98]"
             title="Copy"
           >
             <Copy className="h-4 w-4" />
@@ -288,7 +286,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
           <button
             type="button"
             onClick={onOpen}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98]"
             title="Open"
           >
             <ExternalLink className="h-4 w-4" />
@@ -300,17 +298,15 @@ function RowItem({ left, right, onCopy, onOpen }) {
 }
 
 /**
- * MOBILE = GRID (no columns) ✅ fixes iOS scroll/blur weirdness
+ * MOBILE = GRID (no columns) ✅ best iOS behavior
  * DESKTOP = CSS columns masonry ✅
  */
 function Masonry({ children }) {
   return (
     <>
-      {/* mobile grid */}
       <div className="grid gap-4 md:hidden">{children}</div>
 
-      {/* desktop masonry */}
-      <div className="hidden md:block masonry gap-4">
+      <div className="hidden md:block masonry">
         {React.Children.map(children, (child, idx) => (
           <div key={idx} className="mb-4 break-inside-avoid">
             {child}
@@ -361,7 +357,7 @@ export default function Dashboard() {
   const [search, setSearch] = useState("");
   const [onlyProblems, setOnlyProblems] = useState(false);
 
-  // “live” change pulse
+  // live change signature
   const lastSig = useRef("");
 
   function showToast(msg) {
@@ -370,7 +366,7 @@ export default function Dashboard() {
     toastTimer.current = setTimeout(() => setToast(""), 1400);
   }
 
-  /** ===== fallback: compute live metrics from /orders ===== */
+  /** fallback: compute live metrics from /orders */
   async function buildFallbackFromOrders(currencyGuess = "EUR") {
     const list = await api.get("/orders").catch(() => []);
     const orders = Array.isArray(list) ? list : [];
@@ -408,11 +404,7 @@ export default function Dashboard() {
         providerOrderId: o.providerOrderId || "",
       }));
 
-    return {
-      counts,
-      series7dOrders: { labels, orders: seriesOrders },
-      recentOrders,
-    };
+    return { counts, series7dOrders: { labels, orders: seriesOrders }, recentOrders };
   }
 
   async function load({ silent = false } = {}) {
@@ -444,8 +436,7 @@ export default function Dashboard() {
       const computedCompleted = safeNum(completedOrders ?? fbCounts.completed ?? 0);
       const computedFailed = safeNum(failedOrders ?? fbCounts.failed ?? 0);
 
-      const computedActive =
-        d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
+      const computedActive = d.activeOrders != null ? safeNum(d.activeOrders, 0) : computedPending + computedProcessing;
 
       const mergedSeries7d = {
         labels:
@@ -456,12 +447,10 @@ export default function Dashboard() {
           Array.isArray(series7d?.orders) && series7d.orders.length === 7
             ? series7d.orders
             : fallback?.series7dOrders?.orders || [0, 0, 0, 0, 0, 0, 0],
-        topups:
-          Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
+        topups: Array.isArray(series7d?.topups) && series7d.topups.length === 7 ? series7d.topups : [0, 0, 0, 0, 0, 0, 0],
       };
 
-      const lastOrders =
-        Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
+      const lastOrders = Array.isArray(d.lastOrders) && d.lastOrders.length ? d.lastOrders : fallback?.recentOrders || [];
 
       const next = {
         loading: false,
@@ -492,7 +481,7 @@ export default function Dashboard() {
         topServices: d.topServices ?? s.topServices ?? null,
       };
 
-      // live pulse signature
+      // live pulse toast only on silent refresh
       const sig = `${next.balance}|${next.activeOrders}|${next.pendingOrders}|${next.processingOrders}|${next.completedOrders}|${next.failedOrders}`;
       if (lastSig.current && lastSig.current !== sig && silent) showToast("Live update");
       lastSig.current = sig;
@@ -509,6 +498,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     let alive = true;
+
     (async () => {
       if (!alive) return;
       await load();
@@ -544,15 +534,8 @@ export default function Dashboard() {
   const currency = s.currency || "EUR";
   const loading = s.loading;
 
-  const ordersBars = useMemo(() => {
-    const arr = s.series7d?.orders || [];
-    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
-  }, [s.series7d]);
-
-  const topupsBars = useMemo(() => {
-    const arr = s.series7d?.topups || [];
-    return arr.length ? arr : [0, 0, 0, 0, 0, 0, 0];
-  }, [s.series7d]);
+  const ordersBars = useMemo(() => (s.series7d?.orders?.length ? s.series7d.orders : [0, 0, 0, 0, 0, 0, 0]), [s.series7d]);
+  const topupsBars = useMemo(() => (s.series7d?.topups?.length ? s.series7d.topups : [0, 0, 0, 0, 0, 0, 0]), [s.series7d]);
 
   const orders7dTotal = useMemo(() => ordersBars.reduce((a, b) => a + safeNum(b, 0), 0), [ordersBars]);
   const topups7dTotal = useMemo(() => topupsBars.reduce((a, b) => a + safeNum(b, 0), 0), [topupsBars]);
@@ -606,12 +589,7 @@ export default function Dashboard() {
   }, [s.lastUpdatedAt]);
 
   const totalOrdersSnapshot = useMemo(() => {
-    return (
-      safeNum(s.completedOrders, 0) +
-      safeNum(s.failedOrders, 0) +
-      safeNum(s.pendingOrders, 0) +
-      safeNum(s.processingOrders, 0)
-    );
+    return safeNum(s.completedOrders, 0) + safeNum(s.failedOrders, 0) + safeNum(s.pendingOrders, 0) + safeNum(s.processingOrders, 0);
   }, [s.completedOrders, s.failedOrders, s.pendingOrders, s.processingOrders]);
 
   const filteredOrders = useMemo(() => {
@@ -649,7 +627,7 @@ export default function Dashboard() {
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
 
-        /* iOS Safari: avoid auto-zoom on inputs (must be >=16px) */
+        /* iOS Safari: avoid auto-zoom on inputs (font-size must be >= 16px) */
         @media (max-width: 767px){
           .mobile-nozoom input,
           .mobile-nozoom select,
@@ -659,17 +637,18 @@ export default function Dashboard() {
           }
         }
 
-        /* Touch devices: disable hover scale to prevent “tap then scroll” feel */
-        @media (hover: none){
-          .group:hover { transform: none !important; }
-        }
-
-        /* Prevent “sticky blur layer” glitches on iOS */
+        /* iOS blur/perf: disable heavy blur on iOS (prevents "tap then scroll" feeling) */
         @supports (-webkit-touch-callout: none){
           .ios-glass-fix {
             -webkit-backdrop-filter: none !important;
             backdrop-filter: none !important;
           }
+        }
+
+        /* Small UX polish on iOS */
+        .dashboard-root {
+          -webkit-text-size-adjust: 100%;
+          touch-action: pan-y;
         }
       `}</style>
 
@@ -696,7 +675,7 @@ export default function Dashboard() {
           </div>
 
           <div className="mt-1 text-sm text-zinc-100/70">
-            Balance, orders, spend, ops & intelligence — ultra clean panel.
+            Balance, orders, spend, ops & intelligence — ultra-clean operations panel.
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -721,21 +700,21 @@ export default function Dashboard() {
               }}
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100",
-                "hover:bg-white/10",
+                "hover:bg-white/10 active:scale-[0.99]",
                 "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_12px_30px_rgba(0,0,0,0.35)]"
               )}
             >
               <RefreshCcw className="h-4 w-4" /> Refresh
             </button>
 
-            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10" href="/wallet">
+            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]" href="/wallet">
               <Wallet className="h-4 w-4" /> Wallet
             </a>
 
             <a
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl bg-white/15 px-4 py-2 text-sm font-semibold text-white",
-                "hover:bg-white/20",
+                "hover:bg-white/20 active:scale-[0.99]",
                 "shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_16px_40px_rgba(56,189,248,0.16)]"
               )}
               href="/create-order"
@@ -743,7 +722,7 @@ export default function Dashboard() {
               <ShoppingCart className="h-4 w-4" /> Create order
             </a>
 
-            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10" href="/services">
+            <a className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]" href="/services">
               <Layers className="h-4 w-4" /> Services
             </a>
           </div>
@@ -751,7 +730,7 @@ export default function Dashboard() {
           <div className="flex flex-wrap items-center justify-between gap-2 lg:justify-end">
             <button
               onClick={() => setAutoRefresh((x) => !x)}
-              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-100/90 hover:bg-white/10"
+              className="rounded-2xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
             >
               {autoRefresh ? "Pause live" : "Resume live"}
             </button>
@@ -775,7 +754,7 @@ export default function Dashboard() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search orders/topups…"
+                placeholder="Search orders / top-ups…"
                 className="w-56 bg-transparent outline-none placeholder:text-zinc-100/40"
               />
               {search ? (
@@ -788,7 +767,7 @@ export default function Dashboard() {
             <button
               onClick={() => setOnlyProblems((x) => !x)}
               className={cn(
-                "inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-1.5 text-xs",
+                "inline-flex items-center gap-2 rounded-2xl border border-white/10 px-3 py-1.5 text-xs active:scale-[0.99]",
                 onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
                 "hover:bg-white/10"
               )}
@@ -824,14 +803,14 @@ export default function Dashboard() {
             </div>
 
             <div className="text-sm text-zinc-100/70">
-              Wallet funds are used instantly on checkout. Top up & place orders in seconds.
+              Wallet funds are used instantly at checkout. Top up and place orders within seconds.
             </div>
 
             <Divider />
 
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">Spent 30d</div>
+                <div className="text-xs text-zinc-100/60">Spent (30d)</div>
                 <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spent30d, currency)}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
@@ -839,7 +818,7 @@ export default function Dashboard() {
                 <div className="mt-1 text-lg font-bold">{loading ? "—" : fmtMoney(s.spentAllTime, currency)}</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-xs text-zinc-100/60">Health</div>
+                <div className="text-xs text-zinc-100/60">System health</div>
                 <div className="mt-1 flex items-center gap-2">
                   <Chip tone={health.tone}>
                     <ShieldCheck className="h-3.5 w-3.5" /> {health.msg}
@@ -860,7 +839,7 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        <Card title="Quality (7d)" right={loading ? "" : "Success + speed"} icon={ShieldCheck}>
+        <Card title="Quality (7d)" right={loading ? "" : "Success & speed"} icon={ShieldCheck}>
           {loading ? (
             <div className="space-y-2">
               <Skeleton className="h-7 w-24" />
@@ -874,12 +853,14 @@ export default function Dashboard() {
                   <div className="text-3xl font-black tracking-tight">{s.successRate7d == null ? "—" : fmtPct(s.successRate7d)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-zinc-100/60 text-right">Avg fulfill</div>
+                  <div className="text-xs text-zinc-100/60 text-right">Avg fulfilment</div>
                   <div className="text-3xl font-black tracking-tight text-right">{s.avgFulfillMins7d == null ? "—" : `${Math.round(s.avgFulfillMins7d)}m`}</div>
                 </div>
               </div>
 
-              <div className="text-xs text-zinc-100/60">7-day performance estimate. Perfect for scaling decisions.</div>
+              <div className="text-xs text-zinc-100/60">
+                Rolling 7-day performance indicators. Useful for scale and capacity decisions.
+              </div>
 
               <div className="flex flex-wrap gap-2">
                 <Chip tone={health.tone}>{health.msg}</Chip>
@@ -919,14 +900,14 @@ export default function Dashboard() {
             <div className="flex items-end justify-between gap-4">
               <div>
                 <div className="text-3xl font-black tracking-tight">{fmtInt(orders7dTotal)}</div>
-                <div className="text-xs text-zinc-100/60">Total orders in last 7 days</div>
+                <div className="text-xs text-zinc-100/60">Total orders in the last 7 days</div>
               </div>
               <MiniBars data={ordersBars} />
             </div>
           )}
         </Card>
 
-        <Card title="Topups (7d)" right={loading ? "" : `Daily ${currency}`} className="overflow-hidden" icon={Wallet}>
+        <Card title="Top-ups (7d)" right={loading ? "" : `Daily ${currency}`} className="overflow-hidden" icon={Wallet}>
           {loading ? (
             <div className="space-y-2">
               <Skeleton className="h-9 w-40" />
@@ -936,39 +917,42 @@ export default function Dashboard() {
             <div className="flex items-end justify-between gap-4">
               <div>
                 <div className="text-3xl font-black tracking-tight">{fmtMoney(topups7dTotal, currency)}</div>
-                <div className="text-xs text-zinc-100/60">Total topups in last 7 days</div>
+                <div className="text-xs text-zinc-100/60">Total top-ups in the last 7 days</div>
               </div>
               <MiniBars data={topupsBars} />
             </div>
           )}
         </Card>
 
-        <Card title="Protected dashboard" right="Legal & safe" icon={Lock}>
+        <Card title="Security & compliance" right="Policy-first" icon={Lock}>
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               <Chip tone="info">
-                <Lock className="h-3.5 w-3.5" /> Auth required
+                <Lock className="h-3.5 w-3.5" /> Authentication required
               </Chip>
               <Chip tone="warn">Abuse prevention (rate limiting)</Chip>
               <Chip tone="neutral">
                 <FileText className="h-3.5 w-3.5" /> Policies
               </Chip>
             </div>
+
             <div className="text-sm text-zinc-100/70">
               Access to this panel is restricted to authenticated users. Payments and top-ups are processed by supported providers.
-              We store only the minimum required data for account access and order processing. For details, see policy pages.
+              We store only the minimum required data for account access and order processing. For full details, see our policy pages.
             </div>
+
             <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
               <a className="underline hover:text-white" href="/terms">Terms</a>
               <a className="underline hover:text-white" href="/privacy">Privacy</a>
               <a className="underline hover:text-white" href="/refunds">Refunds</a>
               <span>•</span>
-              <span>2050 Masonry ✅</span>
+              <span>Mobile grid ✅</span>
+              <span>Desktop masonry ✅</span>
             </div>
           </div>
         </Card>
 
-        <Card title="Last topups" right={loading ? "" : "Latest"} icon={Wallet}>
+        <Card title="Last top-ups" right={loading ? "" : "Latest"} icon={Wallet}>
           {loading ? (
             <div className="space-y-2">
               <Skeleton className="h-12 w-full" />
@@ -1015,7 +999,7 @@ export default function Dashboard() {
                       id
                         ? async () => {
                             const ok = await copyText(id);
-                            showToast(ok ? "Copied topup id" : "Copy failed");
+                            showToast(ok ? "Copied top-up id" : "Copy failed");
                           }
                         : null
                     }
@@ -1024,7 +1008,7 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-zinc-100/60">No topups yet. Go to Wallet and top up.</div>
+            <div className="text-sm text-zinc-100/60">No top-ups yet. Go to Wallet and top up.</div>
           )}
         </Card>
 
@@ -1092,8 +1076,9 @@ export default function Dashboard() {
       </Masonry>
 
       <div className="text-xs text-zinc-100/50">
-        Mobile: grid ✅ (no columns, no iOS scroll bugs). Desktop: masonry columns ✅. iOS zoom fixed (inputs 16px).
+        Mobile: grid ✅ (no columns; best iOS scroll). Desktop: masonry ✅. iOS input zoom prevented (16px inputs).
       </div>
     </div>
   );
 }
+
