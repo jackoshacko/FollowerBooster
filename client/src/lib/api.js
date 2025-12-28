@@ -5,7 +5,7 @@ const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 /* ================= URL HELPERS ================= */
 export function apiUrl(path = "") {
   const p = path.startsWith("/") ? path : `/${path}`;
-  return `${API}${p}`;
+  return `${String(API).replace(/\/$/, "")}${p}`;
 }
 
 /* ================= TOKEN + USER HELPERS ================= */
@@ -47,14 +47,14 @@ export function clearAuthLocal() {
 }
 
 function redirectToLogin() {
-  if (typeof window === "undefined") return;
-  if (window.location.pathname !== "/login") window.location.href = "/login";
+  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
 }
 
 /* ================= CORE PARSERS ================= */
 async function readResponse(res) {
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
-
   let text = "";
   try {
     text = await res.text();
@@ -71,7 +71,6 @@ async function readResponse(res) {
         json = null;
       }
     } else {
-      // backend nekad vrati json bez content-type
       const t = text.trim();
       if (
         (t.startsWith("{") && t.endsWith("}")) ||
@@ -93,22 +92,15 @@ function pickErrorMessage(json, textFallback = "", statusFallback = "Request fai
   return json?.message || json?.error || textFallback || statusFallback;
 }
 
-function looksLikeNgrokHtml(text) {
+function looksLikeHtml(text) {
   if (!text) return false;
   const t = text.toLowerCase();
-  return t.includes("<html") && t.includes("ngrok");
+  return t.includes("<html") || t.includes("<!doctype html");
 }
 
-/* ================= ENV / NGROK HEADER =================
-   ❌ ngrok-skip-browser-warning u production browseru pravi CORS preflight fail
-   ✅ šalji ga SAMO kad si lokalno na localhost
-======================================================== */
-const IS_BROWSER = typeof window !== "undefined";
-const HOST = IS_BROWSER ? String(window.location.hostname) : "";
-const IS_LOCALHOST = HOST === "localhost" || HOST === "127.0.0.1";
-
-function shouldSendNgrokSkipHeader() {
-  return IS_BROWSER && IS_LOCALHOST;
+function apiLooksNgrok() {
+  const a = String(API).toLowerCase();
+  return a.includes("ngrok-free.dev") || a.includes("ngrok.io");
 }
 
 /* ================= CORE REQUEST (TOKEN-ONLY) ================= */
@@ -116,8 +108,8 @@ export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
 
-  // zabrani da neko prosledi credentials/mode i sjebe CORS
-  const { credentials, mode, headers: extraHeaders, body, ...rest } = options;
+  // hard block credentials/mode overrides
+  const { headers: extraHeaders, body, ...rest } = options;
 
   const hasBody = body !== undefined && body !== null;
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
@@ -125,7 +117,7 @@ export async function request(path, options = {}) {
   const isString = typeof body === "string";
 
   const finalBody =
-    !hasBody ? undefined : (isForm || isBlob || isString) ? body : JSON.stringify(body);
+    !hasBody ? undefined : isForm || isBlob || isString ? body : JSON.stringify(body);
 
   const headers = {
     Accept: "application/json",
@@ -134,31 +126,26 @@ export async function request(path, options = {}) {
     ...(extraHeaders || {}),
   };
 
-  // ✅ only local dev (optional)
-  if (shouldSendNgrokSkipHeader()) {
+  // ✅ KEY FIX: ako je API ngrok, uvek šalji header (i na Vercel, i na telefonu)
+  if (apiLooksNgrok()) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
-  let res;
-  try {
-    res = await fetch(apiUrl(path), {
-      ...rest,
-      method,
-      headers,
-      body: method === "GET" || method === "HEAD" ? undefined : finalBody,
-      credentials: "omit", // ✅ ALWAYS token-only
-      mode: "cors",
-    });
-  } catch (e) {
-    // pravi “NetworkError when attempting to fetch resource.”
-    throw new Error(e?.message || "NetworkError when attempting to fetch resource.");
-  }
+  const res = await fetch(apiUrl(path), {
+    ...rest,
+    method,
+    headers,
+    body: method === "GET" || method === "HEAD" ? undefined : finalBody,
+    credentials: "omit", // ✅ token-only
+    mode: "cors",
+  });
 
   const { json, text, contentType } = await readResponse(res);
 
-  if (looksLikeNgrokHtml(text)) {
+  // ngrok warning page ili bilo koji HTML (nije JSON)
+  if (looksLikeHtml(text) && !contentType.includes("application/json")) {
     throw new Error(
-      `NGROK returned HTML instead of API response. Check ngrok + VITE_API_URL.\nURL: ${apiUrl(path)}`
+      `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(path)}`
     );
   }
 
@@ -181,66 +168,33 @@ export async function request(path, options = {}) {
   return null;
 }
 
-/* plain text helper */
-export async function requestText(path, options = {}) {
-  const token = getToken();
-  const method = String(options.method || "GET").toUpperCase();
-
-  const { headers: extraHeaders, ...rest } = options;
-
-  const headers = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(extraHeaders || {}),
-  };
-
-  const res = await fetch(apiUrl(path), {
-    ...rest,
-    method,
-    headers,
-    credentials: "omit",
-    mode: "cors",
-  });
-
-  const text = await res.text().catch(() => "");
-
-  if (res.status === 401) {
-    clearAuthLocal();
-    redirectToLogin();
-    throw new Error("Unauthorized");
-  }
-  if (!res.ok) throw new Error(text || "Request failed");
-  return text;
-}
-
-/* ================= API WRAPPER ================= */
+/* ================= API WRAPPER HELPERS ================= */
 function extractToken(out) {
-  const t =
+  return (
     out?.token ||
     out?.accessToken ||
     out?.access_token ||
     out?.data?.token ||
     out?.data?.accessToken ||
-    out?.data?.access_token;
-  return t ? String(t) : "";
+    out?.data?.access_token ||
+    ""
+  );
 }
 
 function extractUser(out) {
   return out?.user || out?.data?.user || null;
 }
 
+/* ================= API WRAPPER ================= */
 export const api = {
-  /* generic */
+  // generic
   get: (p) => request(p),
   post: (p, b) => request(p, { method: "POST", body: b }),
   put: (p, b) => request(p, { method: "PUT", body: b }),
   patch: (p, b) => request(p, { method: "PATCH", body: b }),
   del: (p, b) => request(p, { method: "DELETE", body: b }),
 
-  /* misc */
-  health: () => requestText("/health"),
-  root: () => request("/"),
-
-  /* auth */
+  // auth/me
   me: () => request("/api/me"),
 
   login: async (payload) => {
@@ -278,7 +232,7 @@ export const api = {
     redirectToLogin();
   },
 
-  /* services */
+  // services (✅ ovo ti je falilo => "servicesPublic is not a function")
   servicesPublic: () => request("/services"),
   servicesAdmin: () => request("/admin/services"),
 
@@ -286,14 +240,17 @@ export const api = {
   updateService: (id, payload) => request(`/admin/services/${id}`, { method: "PUT", body: payload }),
   toggleService: (id) => request(`/admin/services/${id}/toggle`, { method: "PATCH" }),
 
-  /* orders */
+  // orders
   createOrder: (payload) => request("/orders", { method: "POST", body: payload }),
   myOrders: () => request("/orders"),
 
-  /* wallet */
+  // wallet
   wallet: () => request("/wallet"),
 
-  /* paypal */
+  // dashboard
+  dashboard: () => request("/api/dashboard"),
+
+  // PayPal
   paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: payload }),
   paypalCapture: (payload) => request("/payments/paypal/capture", { method: "POST", body: payload }),
 };
