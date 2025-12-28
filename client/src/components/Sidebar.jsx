@@ -177,12 +177,6 @@ function Section({ title, icon, collapsed, children }) {
   );
 }
 
-/**
- * ✅ FIXED SidebarShell:
- * - Desktop: glass (as before)
- * - Mobile drawer: solid panel (no see-through / no blur compositing bugs)
- * - iOS scroll/touch stability (proper scroll container)
- */
 function SidebarShell({
   children,
   collapsed,
@@ -200,41 +194,18 @@ function SidebarShell({
       className={cls(
         "relative p-4",
         mobile ? "h-[100dvh]" : "h-screen",
-        "border-r border-white/10",
-        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
-        collapsed ? "w-[98px]" : "w-[310px]",
-
+        // ✅ FIX: mobile drawer must NOT be transparent
         mobile
-          ? cls(
-              "bg-zinc-950/98", // ✅ solid
-              "backdrop-blur-none", // ✅ no blur on drawer
-              "overflow-hidden",
-              "touch-pan-y",
-              "overscroll-contain"
-            )
-          : "bg-black/35 backdrop-blur-xl"
+          ? "fb-drawer border-r border-white/10"
+          : "border-r border-white/10 bg-black/35 backdrop-blur-xl shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+        collapsed ? "w-[98px]" : "w-[310px]"
       )}
-      style={
-        mobile
-          ? {
-              WebkitTransform: "translateZ(0)",
-              transform: "translateZ(0)",
-              WebkitBackfaceVisibility: "hidden",
-              backfaceVisibility: "hidden",
-            }
-          : undefined
-      }
     >
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
         <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
       </div>
-
-      {/* mobile premium overlay (no transparency bleed) */}
-      {mobile ? (
-        <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-white/[0.06] via-transparent to-black/40" />
-      ) : null}
 
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
@@ -266,11 +237,7 @@ function SidebarShell({
               )}
               title={collapsed ? "Expand" : "Collapse"}
             >
-              {collapsed ? (
-                <ChevronsRight className="h-4 w-4" />
-              ) : (
-                <ChevronsLeft className="h-4 w-4" />
-              )}
+              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
             </button>
           ) : null}
 
@@ -293,25 +260,10 @@ function SidebarShell({
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
-        {/* ✅ iOS-safe scroll container */}
-        <div
-          className={cls(
-            "min-h-0 flex-1 overflow-y-auto pr-1",
-            "[scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]",
-            mobile ? "overscroll-contain" : ""
-          )}
-          style={
-            mobile
-              ? {
-                  WebkitOverflowScrolling: "touch",
-                  touchAction: "pan-y",
-                }
-              : undefined
-          }
-        >
+        {/* ✅ FIX: iOS scroll stability inside drawer */}
+        <div className={cls("min-h-0 flex-1 overflow-y-auto pr-1", mobile ? "fb-drawer-scroll" : "")}>
           {children}
         </div>
-
         {footer ? <div className="mt-3">{footer}</div> : null}
       </div>
     </aside>
@@ -595,7 +547,6 @@ export default function Sidebar({ mobile = false, onClose }) {
 
   const content = (
     <>
-      {/* (optional) keep this, or remove if you want only the X button in Topbar */}
       {typeof onClose === "function" && mobile ? (
         <button
           onClick={onClose}
@@ -716,6 +667,7 @@ export default function Sidebar({ mobile = false, onClose }) {
     );
   }
 
+  // ✅ mobile mode: never collapsed (panel width stable)
   return (
     <SidebarShell
       mobile
