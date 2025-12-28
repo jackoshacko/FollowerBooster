@@ -1,32 +1,51 @@
 // server/src/app.js
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 
-// routes...
+// ================= PUBLIC ROUTES =================
 import healthRoutes from "./routes/health.routes.js";
 import authRoutes from "./routes/auth.routes.js";
 import servicesRoutes from "./routes/services.routes.js";
+
+// ================= USER ROUTES =================
 import meRoutes from "./routes/me.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import ordersRoutes from "./routes/orders.routes.js";
 import ordersSyncRoutes from "./routes/orders.sync.routes.js";
 import walletRoutes from "./routes/wallet.routes.js";
+
+// ================= PAYMENTS (USER) =================
 import paypalPaymentsRoutes from "./routes/payments.paypal.routes.js";
 import paypalWebhooksRoutes from "./routes/webhooks.paypal.routes.js";
+
+// ================= ADMIN ROUTES =================
 import adminRoutes from "./routes/admin.routes.js";
 import adminServicesRoutes from "./routes/admin.services.routes.js";
 import adminBalanceRoutes from "./routes/admin.balance.routes.js";
 import adminPaypalPaymentsRoutes from "./routes/admin.payments.paypal.routes.js";
 import adminProviderRoutes from "./routes/admin.provider.routes.js";
+
+// ================= MIDDLEWARES =================
 import { notFound } from "./middlewares/notFound.js";
 
+function safeStr(x) {
+  return String(x || "").trim();
+}
+function makeRequestId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// ✅ whitelist + patterns (Vercel previews + ngrok)
 function isAllowedByPattern(origin) {
   try {
     const u = new URL(origin);
     const host = u.hostname;
+
     if (host === "localhost" || host === "127.0.0.1") return true;
     if (host.endsWith(".vercel.app")) return true;
     if (host.endsWith(".ngrok-free.dev") || host.endsWith(".ngrok.io")) return true;
+
     return false;
   } catch {
     return false;
@@ -35,8 +54,34 @@ function isAllowedByPattern(origin) {
 
 export function createApp({ corsOrigins = [] } = {}) {
   const app = express();
+
+  // =====================================================
+  // TRUST PROXY (ngrok / reverse proxies)
+  // =====================================================
   app.set("trust proxy", 1);
 
+  // =====================================================
+  // REQUEST ID + BASIC SECURITY HEADERS
+  // =====================================================
+  app.use((req, res, next) => {
+    const reqId =
+      safeStr(req.headers["x-request-id"]) ||
+      safeStr(req.headers["cf-ray"]) ||
+      makeRequestId();
+
+    req.reqId = reqId;
+    res.setHeader("x-request-id", reqId);
+
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("x-frame-options", "DENY");
+    res.setHeader("referrer-policy", "no-referrer");
+    next();
+  });
+
+  // =====================================================
+  // CORS (TOKEN-ONLY)
+  // - NO cookies => credentials MUST be false
+  // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
@@ -44,54 +89,134 @@ export function createApp({ corsOrigins = [] } = {}) {
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
+  // MUST vary by origin
+  app.use((req, res, next) => {
+    res.setHeader("Vary", "Origin");
+    next();
+  });
+
   const corsOptions = {
     origin(origin, cb) {
-      if (!origin) return cb(null, true); // server-to-server
+      // server-to-server / curl has no origin -> allow
+      if (!origin) return cb(null, true);
+      if (origin === "null") return cb(new Error("CORS: null origin"));
+
       const allowed = whitelist.includes(origin) || isAllowedByPattern(origin);
-      return allowed ? cb(null, origin) : cb(new Error("Not allowed by CORS: " + origin));
+      if (!allowed) {
+        console.error("❌ CORS blocked:", origin);
+        console.error("   whitelist:", whitelist);
+        return cb(new Error("Not allowed by CORS: " + origin));
+      }
+
+      return cb(null, origin); // echo exact origin
     },
-    credentials: false, // ✅ token-only
+
+    // ✅ TOKEN-ONLY
+    credentials: false,
+
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "x-request-id", "Accept", "Origin"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "x-request-id",
+      "Accept",
+      "Origin",
+    ],
     exposedHeaders: ["x-request-id"],
     maxAge: 86400,
     optionsSuccessStatus: 204,
   };
 
-  // ✅ CORS + preflight (OVO je bitno)
   app.use(cors(corsOptions));
-  app.options("*", cors(corsOptions));
 
-  // ✅ PayPal webhooks raw BEFORE json
+  // ✅ handle preflight everywhere
+  app.use((req, res, next) => {
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
+  // =====================================================
+  // COOKIES
+  // (može ostati, ali FE NE SME slati cookies kad smo token-only)
+  // =====================================================
+  app.use(cookieParser());
+
+  // =====================================================
+  // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
+  // =====================================================
   app.use("/webhooks", paypalWebhooksRoutes);
 
-  // body parsers
+  // =====================================================
+  // BODY PARSERS
+  // =====================================================
   app.use(express.json({ limit: "200kb" }));
   app.use(express.urlencoded({ extended: true, limit: "200kb" }));
 
-  // routes
+  // =====================================================
+  // ROOT
+  // =====================================================
+  app.get("/", (req, res) => {
+    res.json({
+      ok: true,
+      service: "FollowerBooster API",
+      env: process.env.NODE_ENV || "development",
+      time: new Date().toISOString(),
+      reqId: req.reqId,
+      corsWhitelist: whitelist,
+    });
+  });
+
+  // =====================================================
+  // ROUTES
+  // =====================================================
   app.use("/health", healthRoutes);
+
+  // public
   app.use("/auth", authRoutes);
   app.use("/services", servicesRoutes);
 
+  // user
   app.use("/api", meRoutes);
   app.use("/api", dashboardRoutes);
   app.use("/orders", ordersRoutes);
   app.use("/orders/sync", ordersSyncRoutes);
   app.use("/wallet", walletRoutes);
+
+  // payments
   app.use("/payments/paypal", paypalPaymentsRoutes);
 
+  // admin
   app.use("/admin", adminRoutes);
   app.use("/admin/services", adminServicesRoutes);
   app.use("/admin/balance", adminBalanceRoutes);
   app.use("/admin/provider", adminProviderRoutes);
   app.use("/admin/payments/paypal", adminPaypalPaymentsRoutes);
 
+  // 404
   app.use(notFound);
 
+  // =====================================================
+  // GLOBAL ERROR HANDLER
+  // =====================================================
   app.use((err, req, res, next) => {
-    console.error(err);
-    res.status(500).json({ ok: false, message: err?.message || "Server error" });
+    const status = err?.status || err?.statusCode || 500;
+
+    console.error("🔥 BACKEND ERROR");
+    console.error("REQ_ID:", req.reqId);
+    console.error("METHOD:", req.method);
+    console.error("URL:", req.originalUrl);
+    console.error(err?.stack || err);
+
+    const isProd = (process.env.NODE_ENV || "").toLowerCase() === "production";
+
+    return res.status(status).json({
+      ok: false,
+      status,
+      message: err?.message || "Internal Server Error",
+      ...(isProd ? {} : { stack: err?.stack }),
+      reqId: req.reqId,
+    });
   });
 
   return app;
