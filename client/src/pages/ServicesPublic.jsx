@@ -42,6 +42,7 @@ export default function ServicesPublic() {
   const [platform, setPlatform] = useState("all");
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState("pop"); // pop | priceAsc | priceDesc
+  const [onlyInStock, setOnlyInStock] = useState(false);
 
   const [authed, setAuthed] = useState(() => !!localStorage.getItem("token"));
 
@@ -104,16 +105,12 @@ export default function ServicesPublic() {
     let arr = list.slice();
 
     if (platform !== "all") {
-      arr = arr.filter(
-        (x) =>
-          String(x?.platform || "").toLowerCase() === platform.toLowerCase()
-      );
+      const p = platform.toLowerCase();
+      arr = arr.filter((x) => String(x?.platform || "").toLowerCase() === p);
     }
     if (category !== "all") {
-      arr = arr.filter(
-        (x) =>
-          String(x?.category || "").toLowerCase() === category.toLowerCase()
-      );
+      const c = category.toLowerCase();
+      arr = arr.filter((x) => String(x?.category || "").toLowerCase() === c);
     }
 
     if (needle) {
@@ -126,19 +123,18 @@ export default function ServicesPublic() {
       });
     }
 
+    if (onlyInStock) {
+      // enabled !== false
+      arr = arr.filter((x) => x?.enabled !== false);
+    }
+
     if (sort === "priceAsc")
-      arr.sort(
-        (a, b) =>
-          Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0)
-      );
+      arr.sort((a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0));
     if (sort === "priceDesc")
-      arr.sort(
-        (a, b) =>
-          Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0)
-      );
+      arr.sort((a, b) => Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0));
 
     return arr;
-  }, [list, q, platform, category, sort]);
+  }, [list, q, platform, category, sort, onlyInStock]);
 
   function onBuy(serviceId) {
     const target = `/create-order?serviceId=${encodeURIComponent(serviceId)}`;
@@ -151,18 +147,24 @@ export default function ServicesPublic() {
     setPlatform("all");
     setCategory("all");
     setSort("pop");
+    setOnlyInStock(false);
   }
 
   const total = list.length;
   const shown = filtered.length;
 
-  // ✅ iOS / mobile PERFECT: sticky below fixed PublicLayout topbar
-  // PublicLayout sets: --pubTop: calc(env(safe-area-inset-top) + 64px)
-  const stickyTop = "calc(var(--pubTop) + 10px)";
+  // ✅ STICKY MUST BE EXACTLY UNDER TOPBAR (NO GAP)
+  // PublicLayout should define: --pubTop: calc(env(safe-area-inset-top) + 64px)
+  const stickyTop = "var(--pubTop)";
 
-  const glass2050 = cls(
+  // ✅ Mobile = solid (NOT transparent). Desktop = glass.
+  const stickyShellCls = cls(
     "rounded-3xl border border-white/10",
-    "bg-black/45 backdrop-blur-2xl",
+    // mobile solid:
+    "bg-zinc-950",
+    // desktop glass:
+    "md:bg-black/45 md:backdrop-blur-2xl",
+    // shadow always:
     "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_22px_70px_rgba(168,85,247,0.16)]"
   );
 
@@ -181,22 +183,25 @@ export default function ServicesPublic() {
 
         <div className="flex items-center gap-2 text-xs text-zinc-300/60">
           <Pill>
-            Showing{" "}
-            <span className="text-white/90 font-semibold">&nbsp;{shown}</span> of{" "}
+            Showing <span className="text-white/90 font-semibold">&nbsp;{shown}</span> of{" "}
             <span className="text-white/90 font-semibold">&nbsp;{total}</span>
           </Pill>
           <Pill>{authed ? "Signed in" : "Guest"}</Pill>
         </div>
       </div>
 
-      {/* ✅ STICKY FILTER BAR (FULL AUSTATTUNG iOS FIX) */}
+      {/* ✅ STICKY FILTER BAR (FIXED UNDER TOPBAR + MOBILE SOLID) */}
       <div
-        className={cls("sticky z-40 transform-gpu")}
+        className="sticky z-50 transform-gpu"
         style={{ top: stickyTop, willChange: "transform" }}
       >
-        <div className="h-px w-full bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-70" />
+        {/* subtle line on desktop; on mobile we keep it tight */}
+        <div className="hidden md:block h-px w-full bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-70" />
 
-        <div className={glass2050}>
+        <div className={stickyShellCls}>
+          {/* make it look “not see-through” on mobile */}
+          <div className="h-px w-full bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+
           <div className="p-3 md:p-4">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-12">
               {/* search */}
@@ -214,7 +219,7 @@ export default function ServicesPublic() {
               </div>
 
               {/* platform */}
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <select
                   value={platform}
                   onChange={(e) => setPlatform(e.target.value)}
@@ -229,7 +234,7 @@ export default function ServicesPublic() {
               </div>
 
               {/* category */}
-              <div className="md:col-span-3">
+              <div className="md:col-span-2">
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -240,6 +245,19 @@ export default function ServicesPublic() {
                       {c === "all" ? "All categories" : c}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              {/* sort */}
+              <div className="md:col-span-2">
+                <select
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white backdrop-blur-xl"
+                >
+                  <option value="pop" className="bg-zinc-900">Sort</option>
+                  <option value="priceAsc" className="bg-zinc-900">Price ↑</option>
+                  <option value="priceDesc" className="bg-zinc-900">Price ↓</option>
                 </select>
               </div>
 
@@ -259,32 +277,29 @@ export default function ServicesPublic() {
                 </button>
               </div>
 
-              {/* sort row */}
+              {/* second row: enabled toggle + hint */}
               <div className="md:col-span-12">
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="mt-1 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={sort}
-                      onChange={(e) => setSort(e.target.value)}
-                      className="w-full md:w-[220px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white backdrop-blur-xl"
+                    <button
+                      type="button"
+                      onClick={() => setOnlyInStock((v) => !v)}
+                      className={cls(
+                        "rounded-2xl px-4 py-2 text-sm font-semibold border transition",
+                        onlyInStock
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
+                          : "border-white/10 bg-white/5 text-white/85 hover:bg-white/10 hover:border-white/20"
+                      )}
+                      title="Show only enabled services"
                     >
-                      <option value="pop" className="bg-zinc-900">
-                        Sort
-                      </option>
-                      <option value="priceAsc" className="bg-zinc-900">
-                        Price ↑
-                      </option>
-                      <option value="priceDesc" className="bg-zinc-900">
-                        Price ↓
-                      </option>
-                    </select>
+                      {onlyInStock ? "Enabled only" : "All (incl. disabled)"}
+                    </button>
 
                     <Pill>2050 UI</Pill>
                   </div>
 
                   <div className="text-[11px] text-zinc-300/55">
-                    Tip: tap{" "}
-                    <span className="text-white/80 font-semibold">Buy</span> → guest gets redirected to login.
+                    Tip: tap <span className="text-white/80 font-semibold">Buy</span> → guest gets redirected to login.
                   </div>
                 </div>
               </div>
@@ -315,7 +330,7 @@ export default function ServicesPublic() {
 
             return (
               <div
-                key={id || Math.random()}
+                key={id || `${s?.name || "service"}-${Math.random()}`}
                 className={cls(
                   "rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl",
                   "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_30px_90px_rgba(168,85,247,0.14)]",
@@ -348,29 +363,22 @@ export default function ServicesPublic() {
                 <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-200/70">
                   <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
                     <div className="text-[11px] text-zinc-300/60">Min</div>
-                    <div className="mt-1 text-white/90 font-semibold">
-                      {s?.min ?? "—"}
-                    </div>
+                    <div className="mt-1 text-white/90 font-semibold">{s?.min ?? "—"}</div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
                     <div className="text-[11px] text-zinc-300/60">Max</div>
-                    <div className="mt-1 text-white/90 font-semibold">
-                      {s?.max ?? "—"}
-                    </div>
+                    <div className="mt-1 text-white/90 font-semibold">{s?.max ?? "—"}</div>
                   </div>
                 </div>
 
                 <p className="mt-4 text-sm text-zinc-200/70 line-clamp-3">
-                  {s?.description ||
-                    "Premium catalog item. Open details for full specs."}
+                  {s?.description || "Premium catalog item. Open details for full specs."}
                 </p>
 
                 <div className="mt-5 flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      id ? nav(`/services?focus=${encodeURIComponent(id)}`) : null
-                    }
+                    onClick={() => (id ? nav(`/services?focus=${encodeURIComponent(id)}`) : null)}
                     className={cls(
                       "rounded-2xl px-4 py-2 text-sm font-semibold",
                       "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
