@@ -1,5 +1,4 @@
 // client/src/lib/api.js
-
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* ================= URL HELPERS ================= */
@@ -46,8 +45,35 @@ export function clearAuthLocal() {
   localStorage.removeItem("role");
 }
 
+/* ================= PUBLIC PATH GUARD ================= */
+const PUBLIC_PREFIXES = [
+  "/", // home
+  "/login",
+  "/register",
+  "/no-access",
+  "/auth/callback",
+  "/terms",
+  "/privacy",
+  "/refund",
+  "/contact",
+  "/faq",
+];
+
+function isPublicPath(pathname) {
+  const p = String(pathname || "/");
+  // exact "/" should be allowed
+  if (p === "/") return true;
+  return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
+}
+
 function redirectToLogin() {
-  if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+  if (typeof window === "undefined") return;
+
+  const path = window.location.pathname || "/";
+  // ✅ don't hard-redirect when user is already on public pages
+  if (isPublicPath(path)) return;
+
+  if (path !== "/login") {
     window.location.href = "/login";
   }
 }
@@ -108,7 +134,6 @@ export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
 
-  // hard block credentials/mode overrides
   const { headers: extraHeaders, body, ...rest } = options;
 
   const hasBody = body !== undefined && body !== null;
@@ -126,7 +151,6 @@ export async function request(path, options = {}) {
     ...(extraHeaders || {}),
   };
 
-  // ✅ KEY FIX: ako je API ngrok, uvek šalji header (i na Vercel, i na telefonu)
   if (apiLooksNgrok()) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
@@ -136,13 +160,12 @@ export async function request(path, options = {}) {
     method,
     headers,
     body: method === "GET" || method === "HEAD" ? undefined : finalBody,
-    credentials: "omit", // ✅ token-only
+    credentials: "omit",
     mode: "cors",
   });
 
   const { json, text, contentType } = await readResponse(res);
 
-  // ngrok warning page ili bilo koji HTML (nije JSON)
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
     throw new Error(
       `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(path)}`
@@ -187,14 +210,12 @@ function extractUser(out) {
 
 /* ================= API WRAPPER ================= */
 export const api = {
-  // generic
   get: (p) => request(p),
   post: (p, b) => request(p, { method: "POST", body: b }),
   put: (p, b) => request(p, { method: "PUT", body: b }),
   patch: (p, b) => request(p, { method: "PATCH", body: b }),
   del: (p, b) => request(p, { method: "DELETE", body: b }),
 
-  // auth/me
   me: () => request("/api/me"),
 
   login: async (payload) => {
@@ -232,7 +253,6 @@ export const api = {
     redirectToLogin();
   },
 
-  // services (✅ ovo ti je falilo => "servicesPublic is not a function")
   servicesPublic: () => request("/services"),
   servicesAdmin: () => request("/admin/services"),
 
@@ -240,18 +260,13 @@ export const api = {
   updateService: (id, payload) => request(`/admin/services/${id}`, { method: "PUT", body: payload }),
   toggleService: (id) => request(`/admin/services/${id}/toggle`, { method: "PATCH" }),
 
-  // orders
   createOrder: (payload) => request("/orders", { method: "POST", body: payload }),
   myOrders: () => request("/orders"),
 
-  // wallet
   wallet: () => request("/wallet"),
 
-  // dashboard
   dashboard: () => request("/api/dashboard"),
 
-  // PayPal
   paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: payload }),
   paypalCapture: (payload) => request("/payments/paypal/capture", { method: "POST", body: payload }),
 };
-
