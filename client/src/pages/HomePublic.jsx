@@ -78,8 +78,12 @@ function Badge({ children, tone = "zinc", title }) {
 function Kpi({ label, value, hint }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl shadow-soft">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">{label}</div>
-      <div className="mt-1 text-lg font-black tracking-tight text-white">{value}</div>
+      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">
+        {label}
+      </div>
+      <div className="mt-1 text-lg font-black tracking-tight text-white">
+        {value}
+      </div>
       {hint ? <div className="mt-1 text-xs text-zinc-300/70">{hint}</div> : null}
     </div>
   );
@@ -121,6 +125,12 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prev;
+
+      // ✅ iOS sticky/backdrop fix: nakon unlock-a, “prodrmaj” layout 1 frame
+      requestAnimationFrame(() => {
+        // no-op but forces relayout on some mobile browsers
+        document.documentElement.scrollTop = document.documentElement.scrollTop;
+      });
     };
   }, [open]);
 
@@ -138,10 +148,7 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
 
   return (
     <div className="fixed inset-0 z-[999] px-3 py-6 md:py-10">
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={ref}
         className={cls(
@@ -201,7 +208,9 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
               <div className="text-xs text-zinc-300/70">Price / 1k</div>
-              <div className="mt-1 text-lg font-black text-white">{fmtMoney(price, cur)}</div>
+              <div className="mt-1 text-lg font-black text-white">
+                {fmtMoney(price, cur)}
+              </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
               <div className="text-xs text-zinc-300/70">Minimum</div>
@@ -230,7 +239,9 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
                 To place orders, create an account and sign in.
               </div>
             ) : (
-              <div className="text-sm text-zinc-200/70">You’re authenticated — continue to order.</div>
+              <div className="text-sm text-zinc-200/70">
+                You’re authenticated — continue to order.
+              </div>
             )}
 
             <div className="flex items-center gap-2">
@@ -373,11 +384,19 @@ export default function ServicesPublic() {
 
     // sort
     if (sort === "priceAsc")
-      arr.sort((a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0));
+      arr.sort(
+        (a, b) =>
+          Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0)
+      );
     if (sort === "priceDesc")
-      arr.sort((a, b) => Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0));
+      arr.sort(
+        (a, b) =>
+          Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0)
+      );
     if (sort === "nameAsc")
-      arr.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+      arr.sort((a, b) =>
+        String(a?.name || "").localeCompare(String(b?.name || ""))
+      );
 
     return arr;
   }, [list, q, platform, category, sort, onlyInStock]);
@@ -453,8 +472,8 @@ export default function ServicesPublic() {
             </h1>
 
             <p className="mt-2 max-w-3xl text-sm md:text-base text-zinc-300/80">
-              Browse everything publicly. When you’re ready to buy, we’ll send you through a standard SaaS flow:
-              login → create order → live tracking.
+              Browse everything publicly. When you’re ready to buy, we’ll send you
+              through a standard SaaS flow: login → create order → live tracking.
             </p>
           </div>
 
@@ -488,7 +507,9 @@ export default function ServicesPublic() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-2">
             {tabs.map((t) => {
-              const active = (t === "all" && category === "all") || (t !== "all" && t === category);
+              const active =
+                (t === "all" && category === "all") ||
+                (t !== "all" && t === category);
               return (
                 <button
                   key={t}
@@ -512,8 +533,21 @@ export default function ServicesPublic() {
         </div>
       </div>
 
-      {/* STICKY FILTER BAR */}
-      <div className="sticky top-[76px] z-30 mb-5">
+      {/* ✅ STICKY FILTER BAR — FIXED for ALL devices */}
+      {/* Key: top uses the same public header height: var(--pubTop) */}
+      <div
+        className={cls(
+          "sticky z-[90] mb-5",
+          "transform-gpu"
+        )}
+        style={{
+          top: "var(--pubTop)",
+          willChange: "transform",
+        }}
+      >
+        {/* small premium separator to look “locked” under the topbar */}
+        <div className="h-px w-full bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-70" />
+
         <div className={cls("rounded-3xl p-3 md:p-4", isGlass, "bg-zinc-950/60")}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
@@ -557,10 +591,18 @@ export default function ServicesPublic() {
                 onChange={(e) => setSort(e.target.value)}
                 className="w-full sm:w-[190px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white backdrop-blur-xl"
               >
-                <option value="pop" className="bg-zinc-900">Sort</option>
-                <option value="nameAsc" className="bg-zinc-900">Name A–Z</option>
-                <option value="priceAsc" className="bg-zinc-900">Price ↑</option>
-                <option value="priceDesc" className="bg-zinc-900">Price ↓</option>
+                <option value="pop" className="bg-zinc-900">
+                  Sort
+                </option>
+                <option value="nameAsc" className="bg-zinc-900">
+                  Name A–Z
+                </option>
+                <option value="priceAsc" className="bg-zinc-900">
+                  Price ↑
+                </option>
+                <option value="priceDesc" className="bg-zinc-900">
+                  Price ↓
+                </option>
               </select>
 
               <button
@@ -670,11 +712,9 @@ export default function ServicesPublic() {
                   </div>
                 </div>
 
-                {(s?.min != null || s?.max != null) ? (
+                {s?.min != null || s?.max != null ? (
                   <div className="mt-3 text-xs text-zinc-200/70">
-                    Min:{" "}
-                    <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span>{" "}
-                    • Max:{" "}
+                    Min: <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span> • Max:{" "}
                     <span className="text-white/90 font-semibold">{s?.max ?? "—"}</span>
                   </div>
                 ) : null}
