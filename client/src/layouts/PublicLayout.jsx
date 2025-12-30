@@ -11,7 +11,7 @@ function cls(...xs) {
 export default function PublicLayout() {
   const nav = useNavigate();
 
-  // hard reset: ako je nekad ostao body lock (drawer/modal) iz app-a
+  // reset ako je nekad ostao body lock
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
@@ -28,13 +28,7 @@ export default function PublicLayout() {
   }, []);
 
   return (
-    <div
-      className="h-[100dvh] w-full bg-zinc-950 text-zinc-100 overflow-hidden"
-      style={{
-        // ✅ jedna istina za visinu topbara (64px + safe-area)
-        "--pubTop": "calc(env(safe-area-inset-top) + 64px)",
-      }}
-    >
+    <div className="h-[100dvh] w-full bg-zinc-950 text-zinc-100 overflow-hidden">
       <div className="relative h-full w-full isolate">
         {/* BACKGROUND */}
         <div className="pointer-events-none absolute inset-0 z-0">
@@ -50,14 +44,13 @@ export default function PublicLayout() {
           <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
         </div>
 
-        {/* ✅ SHELL: header sticky + content scroll */}
+        {/* ✅ SHELL: header fixed in place, only content scrolls */}
         <div className="relative z-10 h-full flex flex-col min-w-0">
-          {/* ✅ STICKY TOPBAR (public) */}
-          <header className="sticky top-0 z-[80]">
-            <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
+          {/* TOPBAR (does NOT scroll) */}
+          <header className="shrink-0">
+            <div className="border-b border-white/10 bg-black/45 backdrop-blur-xl">
               <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
 
-              {/* safe-area padding */}
               <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
                 <div className="flex h-16 items-center justify-between min-w-0">
                   <button
@@ -66,9 +59,7 @@ export default function PublicLayout() {
                     title="Home"
                   >
                     <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
-                      <span className="text-xs font-black tracking-tight text-white">
-                        FB
-                      </span>
+                      <span className="text-xs font-black tracking-tight text-white">FB</span>
                     </div>
 
                     <div className="leading-tight min-w-0 text-left">
@@ -140,11 +131,8 @@ export default function PublicLayout() {
             </div>
           </header>
 
-          {/* ✅ SCROLL AREA (only this scrolls) */}
-          <div
-            className="flex-1 overflow-y-auto overscroll-y-contain"
-            style={{ WebkitOverflowScrolling: "touch" }}
-          >
+          {/* ✅ ONLY THIS SCROLLS */}
+          <div className="flex-1 overflow-y-auto overscroll-y-contain" style={{ WebkitOverflowScrolling: "touch" }}>
             <main
               className={cls(
                 "mx-auto w-full max-w-[1200px] 2xl:max-w-[1400px]",
@@ -155,23 +143,14 @@ export default function PublicLayout() {
               <Outlet />
             </main>
 
-            {/* FOOTER LEGAL */}
             <footer className="border-t border-white/10 bg-black/25 backdrop-blur-xl">
               <div className="mx-auto max-w-[1200px] 2xl:max-w-[1400px] px-4 md:px-6 py-6 text-sm text-zinc-300/70 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>© {new Date().getFullYear()} FollowerBooster</div>
                 <div className="flex flex-wrap gap-4">
-                  <NavLink className="hover:text-white" to="/terms">
-                    Terms
-                  </NavLink>
-                  <NavLink className="hover:text-white" to="/privacy">
-                    Privacy
-                  </NavLink>
-                  <NavLink className="hover:text-white" to="/refund">
-                    Refunds
-                  </NavLink>
-                  <NavLink className="hover:text-white" to="/contact">
-                    Contact
-                  </NavLink>
+                  <NavLink className="hover:text-white" to="/terms">Terms</NavLink>
+                  <NavLink className="hover:text-white" to="/privacy">Privacy</NavLink>
+                  <NavLink className="hover:text-white" to="/refund">Refunds</NavLink>
+                  <NavLink className="hover:text-white" to="/contact">Contact</NavLink>
                 </div>
               </div>
             </footer>

@@ -46,28 +46,21 @@ export default function ServicesPublic() {
 
   const [authed, setAuthed] = useState(() => !!localStorage.getItem("token"));
 
-  // ✅ keep authed in sync (same tab + other tabs)
   useEffect(() => {
     const sync = () => setAuthed(!!localStorage.getItem("token"));
-
     const onAuthChanged = () => sync();
-    const onStorage = (e) => {
-      if (e.key === "token") sync();
-    };
+    const onStorage = (e) => e.key === "token" && sync();
 
     window.addEventListener("auth-changed", onAuthChanged);
     window.addEventListener("storage", onStorage);
-
     return () => {
       window.removeEventListener("auth-changed", onAuthChanged);
       window.removeEventListener("storage", onStorage);
     };
   }, []);
 
-  // ✅ load services (public)
   useEffect(() => {
     let alive = true;
-
     (async () => {
       setLoading(true);
       try {
@@ -82,7 +75,6 @@ export default function ServicesPublic() {
         setLoading(false);
       }
     })();
-
     return () => {
       alive = false;
     };
@@ -123,10 +115,7 @@ export default function ServicesPublic() {
       });
     }
 
-    if (onlyInStock) {
-      // enabled !== false
-      arr = arr.filter((x) => x?.enabled !== false);
-    }
+    if (onlyInStock) arr = arr.filter((x) => x?.enabled !== false);
 
     if (sort === "priceAsc")
       arr.sort((a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0));
@@ -153,18 +142,14 @@ export default function ServicesPublic() {
   const total = list.length;
   const shown = filtered.length;
 
-  // ✅ STICKY MUST BE EXACTLY UNDER TOPBAR (NO GAP)
-  // PublicLayout should define: --pubTop: calc(env(safe-area-inset-top) + 64px)
-  const stickyTop = "var(--pubTop)";
+  // ✅ Now sticky is inside scroll container → top:0 is perfect
+  const stickyTop = 0;
 
-  // ✅ Mobile = solid (NOT transparent). Desktop = glass.
+  // ✅ Mobile: solid (no transparent). Desktop: glass.
   const stickyShellCls = cls(
     "rounded-3xl border border-white/10",
-    // mobile solid:
-    "bg-zinc-950",
-    // desktop glass:
+    "bg-zinc-950",                 // ✅ solid on mobile
     "md:bg-black/45 md:backdrop-blur-2xl",
-    // shadow always:
     "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_22px_70px_rgba(168,85,247,0.16)]"
   );
 
@@ -190,21 +175,12 @@ export default function ServicesPublic() {
         </div>
       </div>
 
-      {/* ✅ STICKY FILTER BAR (FIXED UNDER TOPBAR + MOBILE SOLID) */}
-      <div
-        className="sticky z-50 transform-gpu"
-        style={{ top: stickyTop, willChange: "transform" }}
-      >
-        {/* subtle line on desktop; on mobile we keep it tight */}
-        <div className="hidden md:block h-px w-full bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-70" />
-
+      {/* ✅ STICKY FILTER BAR */}
+      <div className="sticky z-50 transform-gpu" style={{ top: stickyTop, willChange: "transform" }}>
         <div className={stickyShellCls}>
-          {/* make it look “not see-through” on mobile */}
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/12 to-transparent" />
-
           <div className="p-3 md:p-4">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-12">
-              {/* search */}
               <div className="md:col-span-5">
                 <input
                   value={q}
@@ -218,7 +194,6 @@ export default function ServicesPublic() {
                 />
               </div>
 
-              {/* platform */}
               <div className="md:col-span-2">
                 <select
                   value={platform}
@@ -233,7 +208,6 @@ export default function ServicesPublic() {
                 </select>
               </div>
 
-              {/* category */}
               <div className="md:col-span-2">
                 <select
                   value={category}
@@ -248,7 +222,6 @@ export default function ServicesPublic() {
                 </select>
               </div>
 
-              {/* sort */}
               <div className="md:col-span-2">
                 <select
                   value={sort}
@@ -261,7 +234,6 @@ export default function ServicesPublic() {
                 </select>
               </div>
 
-              {/* reset */}
               <div className="md:col-span-1">
                 <button
                   type="button"
@@ -271,13 +243,11 @@ export default function ServicesPublic() {
                     "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
                     "transition active:scale-[0.99]"
                   )}
-                  title="Reset filters"
                 >
                   Reset
                 </button>
               </div>
 
-              {/* second row: enabled toggle + hint */}
               <div className="md:col-span-12">
                 <div className="mt-1 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -290,7 +260,6 @@ export default function ServicesPublic() {
                           ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
                           : "border-white/10 bg-white/5 text-white/85 hover:bg-white/10 hover:border-white/20"
                       )}
-                      title="Show only enabled services"
                     >
                       {onlyInStock ? "Enabled only" : "All (incl. disabled)"}
                     </button>
@@ -308,10 +277,8 @@ export default function ServicesPublic() {
         </div>
       </div>
 
-      {/* spacing under sticky bar */}
       <div className="h-4" />
 
-      {/* LIST */}
       {loading ? (
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-zinc-200/70 backdrop-blur-xl shadow-soft">
           Loading services…
