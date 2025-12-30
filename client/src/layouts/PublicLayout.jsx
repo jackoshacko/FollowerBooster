@@ -28,14 +28,12 @@ export default function PublicLayout() {
   }, []);
 
   return (
-    <div
-      className="min-h-[100dvh] w-full bg-zinc-950 text-zinc-100"
-      style={{
-        // ✅ jedna istina za visinu topbara
-        // 64px = h-16, plus safe-area (notch)
-        ["--pubTop" as any]: "calc(env(safe-area-inset-top) + 64px)",
-      }}
-    >
+<div
+  className="min-h-[100dvh] w-full bg-zinc-950 text-zinc-100"
+  style={{
+    "--pubTop": "calc(env(safe-area-inset-top) + 64px)",
+  }}
+>
       {/* BACKGROUND (iza svega) */}
       <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-zinc-950" />
