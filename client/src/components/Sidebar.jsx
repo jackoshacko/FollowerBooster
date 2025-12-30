@@ -1,4 +1,3 @@
-// client/src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -21,6 +20,9 @@ import {
   AlertCircle,
   Clock,
   ArrowUpRight,
+  LifeBuoy,
+  FileText,
+  Mail,
 } from "lucide-react";
 
 import { api, setToken, setUser } from "../lib/api.js";
@@ -195,7 +197,6 @@ function SidebarShell({
       className={cls(
         "relative p-4",
         mobile ? "h-[100dvh]" : "h-screen",
-        // ✅ KEY FIX: mobile sidebar MUST be solid (no see-through)
         mobile
           ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
           : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
@@ -263,7 +264,6 @@ function SidebarShell({
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
-        {/* ✅ keep internal scroll area */}
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
@@ -306,6 +306,8 @@ export default function Sidebar({ mobile = false, onClose }) {
   const isAdmin = me?.role === "admin";
   const isOnAdmin = loc.pathname.startsWith("/admin");
 
+  const authed = !!localStorage.getItem("token");
+
   useEffect(() => {
     localStorage.setItem("sb_collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
@@ -318,26 +320,51 @@ export default function Sidebar({ mobile = false, onClose }) {
     navigate("/login", { replace: true });
   }
 
-  const navClick = () => {
+  // ✅ if guest clicks protected routes: go login
+  function guard(to) {
+    const needsAuth = [
+      "/dashboard",
+      "/create-order",
+      "/orders",
+      "/wallet",
+      "/admin/dashboard",
+      "/admin/services",
+      "/admin/users",
+      "/admin/orders",
+      "/admin/transactions",
+    ];
+    if (!authed && needsAuth.some((p) => String(to).startsWith(p))) {
+      if (mobile && typeof onClose === "function") onClose();
+      navigate("/login", { replace: true });
+      return false;
+    }
+    return true;
+  }
+
+  const navClick = (to) => {
+    if (!guard(to)) return;
     if (mobile && typeof onClose === "function") onClose();
   };
 
+  // Load me only if token exists (prevents useless redirects when not logged)
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true);
       try {
         const token = localStorage.getItem("token");
-        if (!token) throw new Error("no token");
-
+        if (!token) {
+          setMe(null);
+          return;
+        }
         const data = await api.get("/api/me");
         if (!alive) return;
-
         setMe(data);
         localStorage.setItem("role", data?.role || "");
       } catch {
         if (!alive) return;
         setMe(null);
+        // only logout redirect inside app; sidebar is mostly used in app anyway
         hardLogout();
       } finally {
         if (!alive) return;
@@ -435,13 +462,13 @@ export default function Sidebar({ mobile = false, onClose }) {
 
   const emailLabel = useMemo(() => {
     const email = me?.email || me?.username || me?.name;
-    return email || "Authenticated";
-  }, [me]);
+    return email || (authed ? "Authenticated" : "Guest");
+  }, [me, authed]);
 
   const roleLabel = useMemo(() => {
     const r = String(me?.role || "customer").toUpperCase();
-    return r === "ADMIN" ? "ADMIN" : "CUSTOMER";
-  }, [me]);
+    return r === "ADMIN" ? "ADMIN" : authed ? "CUSTOMER" : "GUEST";
+  }, [me, authed]);
 
   const pendingOrders = Number(adminStats?.ordersActive ?? adminStats?.pendingOrders ?? 0);
   const revenue30d = adminStats?.revenue30d ?? adminStats?.revenue ?? null;
@@ -498,28 +525,28 @@ export default function Sidebar({ mobile = false, onClose }) {
             <Chip tone={roleLabel === "ADMIN" ? "info" : "neutral"}>{roleLabel}</Chip>
           </div>
           <div className="mt-1 text-[11px] text-zinc-200/60 truncate">
-            {me?.email || "Authenticated • Wallet-ready • Premium UI"}
+            {me?.email || (authed ? "Authenticated • Wallet-ready • Premium UI" : "Guest • Browse services")}
           </div>
         </div>
 
         <button
-          onClick={() => navigate("/wallet")}
+          onClick={() => (authed ? navigate("/wallet") : navigate("/login"))}
           className={cls(
             "inline-flex items-center gap-1 rounded-2xl px-3 py-2 text-[11px] font-semibold",
             "border border-white/10 bg-white/5 hover:bg-white/10 transition"
           )}
           title="Go to Wallet"
         >
-          <ArrowUpRight className="h-4 w-4" /> Wallet
+          <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
-          onClick={() => navigate("/create-order")}
+          onClick={() => (authed ? navigate("/create-order") : navigate("/login"))}
           className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
         >
-          Create order
+          {authed ? "Create order" : "Sign in"}
         </button>
         <button
           onClick={() => navigate("/services")}
@@ -547,22 +574,39 @@ export default function Sidebar({ mobile = false, onClose }) {
     </div>
   );
 
-  // ✅ KEY FIX: remove the inner "Close" button (you already have X in Topbar drawer)
   const content = (
     <>
+      {/* ✅ GUEST CAN SEE SERVICES ALWAYS */}
+      <Section title="Browse" icon={Sparkles} collapsed={collapsed}>
+        <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={() => navClick("/services")} />
+      </Section>
+
+      {/* ✅ Protected section (requires login) */}
       <Section title="User" icon={Shield} collapsed={collapsed}>
-        <Item to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={navClick} />
-        <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={navClick} />
-        <Item to="/create-order" icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={navClick} />
+        <Item
+          to={authed ? "/dashboard" : "/login"}
+          icon={LayoutDashboard}
+          label="Dashboard"
+          collapsed={collapsed}
+          onClick={() => navClick("/dashboard")}
+        />
 
         <Item
-          to="/orders"
+          to={authed ? "/create-order" : "/login"}
+          icon={ShoppingCart}
+          label="Create order"
+          collapsed={collapsed}
+          onClick={() => navClick("/create-order")}
+        />
+
+        <Item
+          to={authed ? "/orders" : "/login"}
           icon={ListChecks}
           label="Orders"
           collapsed={collapsed}
-          onClick={navClick}
+          onClick={() => navClick("/orders")}
           right={
-            myOrdersCount !== null ? (
+            authed && myOrdersCount !== null ? (
               <Badge
                 title="Your orders"
                 tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
@@ -574,13 +618,13 @@ export default function Sidebar({ mobile = false, onClose }) {
         />
 
         <Item
-          to="/wallet"
+          to={authed ? "/wallet" : "/login"}
           icon={Wallet}
           label="Wallet"
           collapsed={collapsed}
-          onClick={navClick}
+          onClick={() => navClick("/wallet")}
           right={
-            !collapsed && walletSnap.balance != null ? (
+            authed && !collapsed && walletSnap.balance != null ? (
               <Badge title="Balance" tone={walletSnap.balance > 0 ? "green" : "amber"}>
                 {fmtMoney(walletSnap.balance, walletSnap.currency)}
               </Badge>
@@ -589,41 +633,45 @@ export default function Sidebar({ mobile = false, onClose }) {
         />
       </Section>
 
-      <Section title="Account" icon={Settings} collapsed={collapsed}>
-        <div
-          className={cls(
-            "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
-            collapsed ? "hidden" : ""
-          )}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
-              <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
+      {/* Account card only if authed */}
+      {authed ? (
+        <Section title="Account" icon={Settings} collapsed={collapsed}>
+          <div
+            className={cls(
+              "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
+              collapsed ? "hidden" : ""
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
+                <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
+              </div>
+              <button
+                onClick={hardLogout}
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+                title="Logout"
+              >
+                <LogOut className="h-4 w-4" /> Logout
+              </button>
             </div>
-            <button
-              onClick={hardLogout}
-              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
-              title="Logout"
-            >
-              <LogOut className="h-4 w-4" /> Logout
-            </button>
           </div>
-        </div>
-      </Section>
+        </Section>
+      ) : null}
 
-      {isAdmin ? (
+      {/* Admin only */}
+      {authed && isAdmin ? (
         <Section title="Admin" icon={Wrench} collapsed={collapsed}>
-          <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={navClick} />
-          <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={navClick} />
-          <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/admin/dashboard")} />
+          <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={() => navClick("/admin/services")} />
+          <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={() => navClick("/admin/users")} />
 
           <Item
             to="/admin/orders"
             icon={ListChecks}
             label="Orders"
             collapsed={collapsed}
-            onClick={navClick}
+            onClick={() => navClick("/admin/orders")}
             right={
               Number.isFinite(pendingOrders) && pendingOrders > 0 ? (
                 <Badge tone="amber" title="Pending/Processing orders">
@@ -635,9 +683,21 @@ export default function Sidebar({ mobile = false, onClose }) {
             }
           />
 
-          <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={navClick} />
+          <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={() => navClick("/admin/transactions")} />
         </Section>
       ) : null}
+
+      {/* ✅ Support + Legal (available to everyone) */}
+      <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
+        <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
+        <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
+      </Section>
+
+      <Section title="Legal" icon={FileText} collapsed={collapsed}>
+        <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
+        <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
+        <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
+      </Section>
     </>
   );
 
