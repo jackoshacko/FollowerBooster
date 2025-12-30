@@ -3,6 +3,7 @@ import React, { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import Sidebar from "../components/Sidebar.jsx";
 import Topbar from "../components/Topbar.jsx";
+import CookieNotice from "../components/CookieNotice.jsx"; // ✅ ADD
 
 import bgSmm from "../assets/backgroundsmm.jpg";
 
@@ -79,6 +80,9 @@ export default function AppLayout() {
               <div className="pointer-events-none sticky bottom-0 z-10 h-10 w-full bg-gradient-to-t from-black/55 to-transparent" />
             </div>
           </div>
+
+          {/* ✅ Cookie notice visible also inside the app */}
+          <CookieNotice />
         </div>
       </div>
     </div>
