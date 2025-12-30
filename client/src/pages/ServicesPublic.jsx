@@ -1,6 +1,6 @@
 // client/src/pages/ServicesPublic.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
 
 function cls(...xs) {
@@ -20,31 +20,32 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
-function PlatformPill({ label }) {
+function Pill({ children }) {
   return (
     <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-semibold text-zinc-200/80 backdrop-blur-xl">
-      {label}
+      {children}
     </span>
   );
 }
 
 function buildNext(url) {
-  // url is already a path like "/create-order?serviceId=..."
   return encodeURIComponent(url);
 }
 
 export default function ServicesPublic() {
   const nav = useNavigate();
-  const loc = useLocation();
 
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState([]);
+
   const [q, setQ] = useState("");
   const [platform, setPlatform] = useState("all");
+  const [category, setCategory] = useState("all");
   const [sort, setSort] = useState("pop"); // pop | priceAsc | priceDesc
+
   const [authed, setAuthed] = useState(() => !!localStorage.getItem("token"));
 
-  // keep authed in sync (same tab + other tabs)
+  // ✅ keep authed in sync (same tab + other tabs)
   useEffect(() => {
     const sync = () => setAuthed(!!localStorage.getItem("token"));
 
@@ -62,7 +63,7 @@ export default function ServicesPublic() {
     };
   }, []);
 
-  // load services (public endpoint)
+  // ✅ load services (public)
   useEffect(() => {
     let alive = true;
 
@@ -88,9 +89,13 @@ export default function ServicesPublic() {
 
   const platforms = useMemo(() => {
     const s = new Set();
-    for (const it of list) {
-      if (it?.platform) s.add(String(it.platform));
-    }
+    for (const it of list) if (it?.platform) s.add(String(it.platform));
+    return ["all", ...Array.from(s).sort((a, b) => a.localeCompare(b))];
+  }, [list]);
+
+  const categories = useMemo(() => {
+    const s = new Set();
+    for (const it of list) if (it?.category) s.add(String(it.category));
     return ["all", ...Array.from(s).sort((a, b) => a.localeCompare(b))];
   }, [list]);
 
@@ -99,9 +104,10 @@ export default function ServicesPublic() {
     let arr = list.slice();
 
     if (platform !== "all") {
-      arr = arr.filter(
-        (x) => String(x?.platform || "").toLowerCase() === platform.toLowerCase()
-      );
+      arr = arr.filter((x) => String(x?.platform || "").toLowerCase() === platform.toLowerCase());
+    }
+    if (category !== "all") {
+      arr = arr.filter((x) => String(x?.category || "").toLowerCase() === category.toLowerCase());
     }
 
     if (needle) {
@@ -114,185 +120,251 @@ export default function ServicesPublic() {
       });
     }
 
-    // sorting
-    if (sort === "priceAsc") {
-      arr.sort(
-        (a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0)
-      );
-    } else if (sort === "priceDesc") {
-      arr.sort(
-        (a, b) => Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0)
-      );
-    }
+    if (sort === "priceAsc") arr.sort((a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0));
+    if (sort === "priceDesc") arr.sort((a, b) => Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0));
 
     return arr;
-  }, [list, q, platform, sort]);
+  }, [list, q, platform, category, sort]);
 
   function onBuy(serviceId) {
-    if (!serviceId) return;
-
-    // IMPORTANT:
-    // - If your private panel route is "/app/create-order", change target below accordingly.
-    // - If your private route is "/create-order", leave as is.
     const target = `/create-order?serviceId=${encodeURIComponent(serviceId)}`;
-
-    if (!authed) {
-      // send them to login with next
-      return nav(`/login?next=${buildNext(target)}`, {
-        replace: false,
-        state: { from: loc },
-      });
-    }
-
+    if (!authed) return nav(`/login?next=${buildNext(target)}`);
     nav(target);
   }
 
+  function resetFilters() {
+    setQ("");
+    setPlatform("all");
+    setCategory("all");
+    setSort("pop");
+  }
+
+  const total = list.length;
+  const shown = filtered.length;
+
+  // ✅ IMPORTANT: this makes the FILTER BAR stick under the FIXED top header on iOS
+  // Top header is 64px (h-16) + safe-area + small gap
+  const stickyTop = "calc(env(safe-area-inset-top) + 64px + 10px)";
+
   return (
     <div className="w-full">
-      <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      {/* HEADER */}
+      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
-            Services
-          </h1>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">Services</h1>
           <p className="mt-1 text-sm text-zinc-300/70">
             Browse services. To buy, you need an account.
           </p>
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search services…"
-            className={cls(
-              "w-full sm:w-[320px] rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white",
-              "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
-              "focus:border-white/20 focus:bg-white/7"
-            )}
-          />
-
-          <select
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            className="w-full sm:w-[160px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white backdrop-blur-xl"
-          >
-            {platforms.map((p) => (
-              <option key={p} value={p} className="bg-zinc-900">
-                {p === "all" ? "All platforms" : p}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            className="w-full sm:w-[160px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white backdrop-blur-xl"
-          >
-            <option value="pop" className="bg-zinc-900">
-              Sort
-            </option>
-            <option value="priceAsc" className="bg-zinc-900">
-              Price ↑
-            </option>
-            <option value="priceDesc" className="bg-zinc-900">
-              Price ↓
-            </option>
-          </select>
+        <div className="flex items-center gap-2 text-xs text-zinc-300/60">
+          <Pill>
+            Showing <span className="text-white/90 font-semibold">&nbsp;{shown}</span> of{" "}
+            <span className="text-white/90 font-semibold">&nbsp;{total}</span>
+          </Pill>
+          <Pill>{authed ? "Signed in" : "Guest"}</Pill>
         </div>
       </div>
 
+      {/* ✅ STICKY FILTER BAR (iPhone fix) */}
+      <div
+        className={cls(
+          "sticky z-40",
+          "rounded-3xl border border-white/10",
+          "bg-black/45 backdrop-blur-2xl",
+          "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_22px_70px_rgba(168,85,247,0.16)]"
+        )}
+        style={{ top: stickyTop }}
+      >
+        <div className="p-3 md:p-4">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-12">
+            {/* search */}
+            <div className="md:col-span-5">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search name, type, category, description…"
+                className={cls(
+                  "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white",
+                  "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none",
+                  "focus:border-white/20 focus:bg-white/7"
+                )}
+              />
+            </div>
+
+            {/* platform */}
+            <div className="md:col-span-3">
+              <select
+                value={platform}
+                onChange={(e) => setPlatform(e.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white backdrop-blur-xl"
+              >
+                {platforms.map((p) => (
+                  <option key={p} value={p} className="bg-zinc-900">
+                    {p === "all" ? "All platforms" : p}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* category */}
+            <div className="md:col-span-3">
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white backdrop-blur-xl"
+              >
+                {categories.map((c) => (
+                  <option key={c} value={c} className="bg-zinc-900">
+                    {c === "all" ? "All categories" : c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* reset */}
+            <div className="md:col-span-1">
+              <button
+                type="button"
+                onClick={resetFilters}
+                className={cls(
+                  "w-full rounded-2xl px-3 py-2.5 text-sm font-semibold",
+                  "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
+                  "transition active:scale-[0.99]"
+                )}
+                title="Reset filters"
+              >
+                Reset
+              </button>
+            </div>
+
+            {/* sort row */}
+            <div className="md:col-span-12">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-2">
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                    className="w-full md:w-[220px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white backdrop-blur-xl"
+                  >
+                    <option value="pop" className="bg-zinc-900">
+                      Sort
+                    </option>
+                    <option value="priceAsc" className="bg-zinc-900">
+                      Price ↑
+                    </option>
+                    <option value="priceDesc" className="bg-zinc-900">
+                      Price ↓
+                    </option>
+                  </select>
+
+                  <Pill>2050 UI</Pill>
+                </div>
+
+                <div className="text-[11px] text-zinc-300/55">
+                  Tip: tap <span className="text-white/80 font-semibold">Buy</span> → guest gets redirected to login.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* spacing under sticky bar */}
+      <div className="h-4" />
+
+      {/* LIST */}
       {loading ? (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-zinc-200/70 backdrop-blur-xl shadow-soft">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-zinc-200/70 backdrop-blur-xl shadow-soft">
           Loading services…
         </div>
       ) : filtered.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-zinc-200/70 backdrop-blur-xl shadow-soft">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-zinc-200/70 backdrop-blur-xl shadow-soft">
           No services found.
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map((s) => {
-            const id = s?._id || s?.id || null;
+            const id = s?._id || s?.id;
             const cur = s?.currency || "EUR";
             const price = s?.pricePer1000 ?? s?.price ?? 0;
             const disabled = !id;
 
             return (
               <div
-                key={id || `${s?.name || "service"}-${Math.random()}`}
+                key={id}
                 className={cls(
-                  "rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl",
-                  "shadow-soft"
+                  "rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl",
+                  "shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_30px_90px_rgba(168,85,247,0.14)]"
                 )}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-extrabold text-white truncate">
+                    <div className="text-base font-extrabold text-white truncate">
                       {s?.name || "Service"}
                     </div>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {s?.platform ? <PlatformPill label={s.platform} /> : null}
-                      {s?.type ? <PlatformPill label={s.type} /> : null}
-                      {s?.category ? <PlatformPill label={s.category} /> : null}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {s?.platform ? <Pill>{String(s.platform)}</Pill> : null}
+                      {s?.type ? <Pill>{String(s.type)}</Pill> : null}
+                      {s?.category ? <Pill>{String(s.category)}</Pill> : null}
+                      <Pill>per 1k</Pill>
                     </div>
                   </div>
 
                   <div className="shrink-0 text-right">
-                    <div className="text-xs text-zinc-300/70">per 1k</div>
-                    <div className="text-lg font-black text-white">
-                      {fmtMoney(price, cur)}
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-zinc-300/60">
+                      Price / 1k
                     </div>
+                    <div className="text-2xl font-black text-white">{fmtMoney(price, cur)}</div>
                   </div>
                 </div>
 
-                {s?.min || s?.max ? (
-                  <div className="mt-3 text-xs text-zinc-200/70">
-                    Min:{" "}
-                    <span className="text-white/90 font-semibold">
-                      {s?.min ?? "—"}
-                    </span>{" "}
-                    • Max:{" "}
-                    <span className="text-white/90 font-semibold">
-                      {s?.max ?? "—"}
-                    </span>
+                <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-zinc-200/70">
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                    <div className="text-[11px] text-zinc-300/60">Min</div>
+                    <div className="mt-1 text-white/90 font-semibold">{s?.min ?? "—"}</div>
                   </div>
-                ) : null}
+                  <div className="rounded-2xl border border-white/10 bg-black/25 p-3">
+                    <div className="text-[11px] text-zinc-300/60">Max</div>
+                    <div className="mt-1 text-white/90 font-semibold">{s?.max ?? "—"}</div>
+                  </div>
+                </div>
 
-                {s?.description ? (
-                  <p className="mt-3 text-sm text-zinc-200/70 line-clamp-3">
-                    {s.description}
-                  </p>
-                ) : null}
+                <p className="mt-4 text-sm text-zinc-200/70 line-clamp-3">
+                  {s?.description || "Premium catalog item. Open details for full specs."}
+                </p>
 
-                <div className="mt-4 flex items-center justify-between gap-2">
-                  {!authed ? (
-                    <div className="text-xs text-zinc-300/60">
-                      Create an account to order.
-                    </div>
-                  ) : (
-                    <div className="text-xs text-zinc-300/60">Ready to buy.</div>
-                  )}
+                <div className="mt-5 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => nav(`/services?focus=${encodeURIComponent(id)}`)}
+                    className={cls(
+                      "rounded-2xl px-4 py-2 text-sm font-semibold",
+                      "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
+                      "transition active:scale-[0.99]"
+                    )}
+                  >
+                    Details
+                  </button>
 
                   <button
                     disabled={disabled}
                     onClick={() => onBuy(id)}
                     className={cls(
-                      "rounded-2xl px-4 py-2 text-sm font-semibold",
-                      !authed
-                        ? "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90"
-                        : "bg-white text-zinc-900 hover:bg-zinc-200",
+                      "rounded-2xl px-5 py-2 text-sm font-semibold",
+                      authed ? "bg-white text-zinc-900 hover:bg-zinc-200" : "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
                       "transition active:scale-[0.99]",
                       disabled && "opacity-50 cursor-not-allowed"
                     )}
                   >
-                    {!authed ? "Login to buy" : "Buy"}
+                    {authed ? "Buy" : "Login to buy"}
                   </button>
                 </div>
               </div>
             );
           })}
         </div>
-      )}
+      }}
     </div>
   );
 }
