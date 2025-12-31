@@ -1,44 +1,112 @@
 // client/src/pages/Login.jsx
-import React, { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
-import { api, setToken, apiUrl, clearAuthLocal } from "../lib/api.js";
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { api, apiUrl, clearAuthLocal, setToken } from "../lib/api.js";
 
-import bg from "../assets/bg.jpg";
+function cls(...xs) {
+  return xs.filter(Boolean).join(" ");
+}
+
+function getNextFromLocation(loc) {
+  const qs = new URLSearchParams(loc?.search || "");
+  return qs.get("next") || loc?.state?.from?.pathname || "";
+}
+
+function isValidEmail(v) {
+  const s = String(v || "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);
+}
+
+function Pill({ children, tone = "neutral" }) {
+  const tones = {
+    neutral: "border-white/10 bg-white/5 text-zinc-100/85",
+    info: "border-sky-500/25 bg-sky-500/10 text-sky-100",
+    violet: "border-violet-500/25 bg-violet-500/10 text-violet-100",
+    ok: "border-emerald-500/25 bg-emerald-500/10 text-emerald-100",
+  };
+  return (
+    <span
+      className={cls(
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold backdrop-blur-xl",
+        tones[tone] || tones.neutral
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Field({ label, right, children }) {
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold text-zinc-200/70">{label}</div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Feature({ title, desc }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="mt-1 text-xs text-zinc-200/70">{desc}</div>
+    </div>
+  );
+}
+
+const inputCls = cls(
+  "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white",
+  "placeholder:text-zinc-300/40 backdrop-blur-xl outline-none transition",
+  "focus:border-white/20 focus:bg-white/10"
+);
 
 export default function Login() {
   const nav = useNavigate();
   const loc = useLocation();
+  const next = useMemo(() => getNextFromLocation(loc), [loc]);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [remember, setRemember] = useState(true);
+
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [capsOn, setCapsOn] = useState(false);
+
+  useEffect(() => {
+    if (!password) setCapsOn(false);
+  }, [password]);
 
   async function submit(e) {
     e.preventDefault();
     setErr("");
+
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+
+    if (!normalizedEmail) return setErr("Please enter your email.");
+    if (!isValidEmail(normalizedEmail))
+      return setErr("Please enter a valid email address (example: you@example.com).");
+    if (!password) return setErr("Please enter your password.");
+
     setLoading(true);
 
     try {
-      // ✅ koristi dedicated api.login (garantuje da ide kroz lib/api request wrapper)
-      const data = await api.login({
-        email: email.trim(),
-        password,
-      });
+      const data = await api.login({ email: normalizedEmail, password });
 
       const accessToken = data?.accessToken || data?.token;
       if (!accessToken) throw new Error("Login response missing accessToken");
 
       setToken(accessToken);
-      window.dispatchEvent(new Event("auth-changed"));
 
-      // user/role
       let user = data?.user || null;
       let role = data?.user?.role || data?.role || "";
 
-      // ako login ne vraća user/role → povuci /api/me (token-only)
       if (!role || !user) {
-        const me = await api.me(); // ✅ koristi helper
+        const me = await api.me();
         user = me || user;
         role = me?.role || role || "user";
       }
@@ -46,235 +114,318 @@ export default function Login() {
       if (user) localStorage.setItem("user", JSON.stringify(user));
       localStorage.setItem("role", role || "user");
 
-      const fromPath = loc.state?.from?.pathname || "/dashboard";
-      const isAdminRoute = String(fromPath).startsWith("/admin");
+      if (!remember) {
+        // (optional future: switch token storage to sessionStorage)
+      }
+
+      window.dispatchEvent(new Event("auth-changed"));
+
+      const target = next || "/app/dashboard";
+      const isAdminRoute = String(target).startsWith("/app/admin");
 
       if (isAdminRoute && role !== "admin") {
-        nav("/dashboard", { replace: true });
+        nav("/app/dashboard", { replace: true });
         return;
       }
 
-      nav(fromPath === "/" ? "/dashboard" : fromPath, { replace: true });
+      nav(target, { replace: true });
     } catch (e2) {
       setErr(e2?.message || "Login failed");
-      clearAuthLocal(); // ✅ central cleanup
+      clearAuthLocal();
     } finally {
       setLoading(false);
     }
   }
 
   function googleLogin() {
-    // redirect flow (ne XHR) — OK
-    window.location.href = apiUrl("/auth/google");
+    const q = next ? `?next=${encodeURIComponent(next)}` : "";
+    window.location.href = apiUrl(`/auth/google${q}`);
   }
 
-  // UI helpers
-  function focusOn(e) {
-    e.currentTarget.style.border = "1px solid #00d4ff";
-    e.currentTarget.style.boxShadow = "0 0 12px rgba(0,212,255,0.35)";
-  }
-  function focusOff(e) {
-    e.currentTarget.style.border = "1px solid rgba(255,255,255,.12)";
-    e.currentTarget.style.boxShadow = "none";
-  }
-
-  function glowOn(e) {
-    e.currentTarget.style.boxShadow = "0 0 25px rgba(0,212,255,0.55)";
-    e.currentTarget.style.transform = "translateY(-1px)";
-  }
-  function glowOff(e) {
-    e.currentTarget.style.boxShadow = "none";
-    e.currentTarget.style.transform = "translateY(0px)";
-  }
-
-  const loginBg =
-    email.length > 0
-      ? "linear-gradient(135deg, #7c6cff, #00e0ff)"
-      : styles.loginBtn.background;
+  const canSubmit = isValidEmail(email) && password.length > 0 && !loading;
 
   return (
-    <div style={{ ...styles.page, backgroundImage: `url(${bg})` }}>
-      <div style={styles.overlay} />
+    // ✅ CONTENT-ONLY: PublicLayout already provides background + topbar + scroll container
+    <div className="mx-auto w-full max-w-[1100px]">
+      {/* ✅ Perfect spacing for all devices */}
+      <div className="grid gap-5 lg:gap-6 lg:grid-cols-[1.05fr_0.95fr] items-start">
+        {/* Left info card (hidden on mobile, shows on laptop+) */}
+        <div className="hidden lg:block">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_40px_140px_rgba(0,0,0,0.55)]">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-black/25 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_18px_55px_rgba(168,85,247,0.15)]">
+                <span className="text-xs font-black tracking-tight text-white">FB</span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-lg font-black tracking-tight text-white truncate">
+                  FollowerBooster
+                </div>
+                <div className="text-xs text-zinc-300/70 truncate">
+                  Premium social infrastructure • 2050 UI
+                </div>
+              </div>
+            </div>
 
-      <div style={styles.card}>
-        <div style={styles.brand}>FollowerBooster</div>
-        <div style={styles.subtitle}>Premium Social Media Infrastructure</div>
+            <div className="mt-5 space-y-3">
+              <div className="inline-flex items-center gap-2">
+                <Pill tone="violet">2050</Pill>
+                <Pill tone="info">Guest → Account</Pill>
+                <Pill tone="ok">Secure</Pill>
+              </div>
 
-        {err && <div style={styles.error}>{err}</div>}
+              <div className="text-2xl font-black tracking-tight text-white">
+                Sign in. Buy in seconds.
+              </div>
 
-        <button
-          type="button"
-          onClick={googleLogin}
-          style={styles.googleBtn}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#f4f4f4";
-            e.currentTarget.style.boxShadow = "0 0 18px rgba(255,255,255,0.25)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#fff";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0px)";
-          }}
-          disabled={loading}
-        >
-          Continue with Google
-        </button>
+              <div className="text-sm text-zinc-200/70 leading-relaxed">
+                Guest browsing is public. Ordering requires an account for security, receipts,
+                wallet tracking, and support.
+              </div>
 
-        <div style={styles.divider}>
-          <span style={styles.divLine} />
-          <p style={{ margin: 0 }}>or</p>
-          <span style={styles.divLine} />
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <Feature title="Instant access" desc="Fast login and secure session flow." />
+                <Feature title="Live tracking" desc="Order status sync and history." />
+                <Feature title="Wallet ready" desc="Top up, spend, audit trail." />
+                <Feature title="Policies" desc="FAQ, contact, refunds, terms." />
+              </div>
+
+              {next ? (
+                <div className="mt-5 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                  After login you’ll continue to:{" "}
+                  <span className="font-semibold text-white/95">{next}</span>
+                </div>
+              ) : (
+                <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-zinc-200/70">
+                  You’ll land on{" "}
+                  <span className="text-white/90 font-semibold">Dashboard</span> after sign in.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        <form onSubmit={submit} style={styles.form}>
-          <input
-            style={styles.input}
-            placeholder="Email address"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onFocus={focusOn}
-            onBlur={focusOff}
-            autoComplete="email"
-          />
+        {/* Right auth card (always visible) */}
+        <div className="w-full">
+          <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-zinc-950/70 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_140px_rgba(0,0,0,0.60)]">
+            <div className="pointer-events-none absolute inset-0">
+              <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
+              <div className="absolute -right-24 -bottom-24 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
+              <div className="absolute inset-0 bg-[radial-gradient(900px_180px_at_15%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
+            </div>
 
-          <input
-            style={styles.input}
-            placeholder="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onFocus={focusOn}
-            onBlur={focusOff}
-            autoComplete="current-password"
-          />
+            <div className="relative p-6 md:p-7">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="inline-flex items-center gap-2">
+                    <Pill tone="violet">2050</Pill>
+                    <Pill tone="info">Secure sign-in</Pill>
+                  </div>
+                  <h1 className="mt-3 text-2xl md:text-3xl font-black tracking-tight text-white">
+                    Welcome back
+                  </h1>
+                  <p className="mt-1 text-sm text-zinc-200/70">
+                    Sign in to access dashboard, wallet, orders & tracking.
+                  </p>
+                </div>
 
-          <button
-            type="submit"
-            style={{
-              ...styles.loginBtn,
-              background: loginBg,
-              opacity: email.length > 0 ? 1 : 0.92,
-            }}
-            disabled={loading}
-            onMouseEnter={glowOn}
-            onMouseLeave={glowOff}
-          >
-            {loading ? "Authenticating..." : "Login"}
-          </button>
-        </form>
+                <Link
+                  to="/"
+                  className="shrink-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/10 hover:border-white/20 transition"
+                >
+                  Home
+                </Link>
+              </div>
 
-        <div style={styles.footer}>
-          No account? <Link to="/register">Create one</Link>
+              {err ? (
+                <div className="mt-5 rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-100">
+                  <div className="font-semibold">Login failed</div>
+                  <div className="mt-1 text-red-100/80">{err}</div>
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={googleLogin}
+                disabled={loading}
+                className={cls(
+                  "mt-5 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition",
+                  "border border-white/10 bg-white text-zinc-900 hover:bg-zinc-200",
+                  "active:scale-[0.99]",
+                  loading && "opacity-70 cursor-not-allowed"
+                )}
+              >
+                {loading ? "Please wait…" : "Continue with Google"}
+              </button>
+
+              <div className="mt-5 flex items-center gap-3 text-xs text-zinc-300/60">
+                <div className="h-px flex-1 bg-white/10" />
+                <div>or sign in with email</div>
+                <div className="h-px flex-1 bg-white/10" />
+              </div>
+
+              <form onSubmit={submit} className="mt-5 grid gap-3">
+                <Field
+                  label="Email"
+                  right={
+                    email && !isValidEmail(email) ? (
+                      <span className="text-[11px] font-semibold text-amber-200/90">
+                        Enter a valid email
+                      </span>
+                    ) : null
+                  }
+                >
+                  <input
+                    className={inputCls}
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
+                    type="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                  />
+                </Field>
+
+                <Field
+                  label="Password"
+                  right={
+                    <div className="flex items-center gap-2">
+                      {capsOn ? (
+                        <span className="text-[11px] font-semibold text-amber-200/90">
+                          Caps Lock is ON
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setShowPw((v) => !v)}
+                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white/85 hover:bg-white/10 hover:border-white/20 transition"
+                      >
+                        {showPw ? "Hide" : "Show"}
+                      </button>
+                    </div>
+                  }
+                >
+                  <input
+                    className={inputCls}
+                    placeholder="Your password"
+                    type={showPw ? "text" : "password"}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyUp={(e) => setCapsOn(!!e.getModifierState?.("CapsLock"))}
+                    autoComplete="current-password"
+                  />
+                </Field>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <label className="flex items-center gap-2 text-sm text-zinc-200/75 select-none">
+                    <input
+                      type="checkbox"
+                      checked={remember}
+                      onChange={(e) => setRemember(e.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-black/30"
+                    />
+                    Remember me
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setErr("If you forgot your password, contact support for now.")}
+                    className="text-sm font-semibold text-cyan-200/80 hover:text-cyan-200 transition"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!canSubmit}
+                  className={cls(
+                    "mt-2 w-full rounded-2xl px-4 py-3 text-sm font-black transition active:scale-[0.99]",
+                    canSubmit
+                      ? "bg-white text-zinc-900 hover:bg-zinc-200"
+                      : "bg-white/10 text-white/60 border border-white/10 cursor-not-allowed"
+                  )}
+                >
+                  {loading ? "Authenticating…" : "Login"}
+                </button>
+              </form>
+
+              <div className="mt-5 text-center text-sm text-zinc-200/70">
+                No account?{" "}
+                <Link
+                  to={next ? `/register?next=${encodeURIComponent(next)}` : "/register"}
+                  className="font-semibold text-white hover:underline"
+                >
+                  Create one
+                </Link>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-zinc-300/70 leading-relaxed">
+                By continuing, you agree to our{" "}
+                <Link className="text-white/90 hover:underline" to="/terms">
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link className="text-white/90 hover:underline" to="/privacy">
+                  Privacy Policy
+                </Link>
+                . Refunds:{" "}
+                <Link className="text-white/90 hover:underline" to="/refund">
+                  Refund Policy
+                </Link>
+                .
+              </div>
+            </div>
+
+            <div className="relative border-t border-white/10 bg-black/20 px-6 py-4 text-xs text-zinc-300/70 flex items-center justify-between">
+              <span>Secure auth • token-only</span>
+              <Link to="/contact" className="text-white/85 hover:text-white transition font-semibold">
+                Support
+              </Link>
+            </div>
+          </div>
+
+          {/* Mobile helper card (only on small screens) */}
+          <div className="mt-5 lg:hidden rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-2xl">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-black/25">
+                <span className="text-xs font-black tracking-tight text-white">FB</span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-base font-black tracking-tight text-white truncate">
+                  FollowerBooster
+                </div>
+                <div className="text-xs text-zinc-300/70 truncate">
+                  Public browse • account required to order
+                </div>
+              </div>
+            </div>
+
+            {next ? (
+              <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-xs text-cyan-100">
+                After login you’ll continue to:{" "}
+                <span className="font-semibold text-white/95">{next}</span>
+              </div>
+            ) : null}
+          </div>
         </div>
+      </div>
+
+      <div className="mt-8 text-center text-xs text-zinc-400/70">
+        © {new Date().getFullYear()} FollowerBooster •{" "}
+        <Link className="hover:text-white" to="/terms">
+          Terms
+        </Link>{" "}
+        •{" "}
+        <Link className="hover:text-white" to="/privacy">
+          Privacy
+        </Link>{" "}
+        •{" "}
+        <Link className="hover:text-white" to="/refund">
+          Refunds
+        </Link>
       </div>
     </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    display: "grid",
-    placeItems: "center",
-    padding: 16,
-    fontFamily: "Inter, sans-serif",
-    position: "relative",
-  },
-  overlay: {
-    position: "absolute",
-    inset: 0,
-    background: "linear-gradient(180deg, rgba(0,0,0,.65), rgba(0,0,0,.85))",
-  },
-  card: {
-    position: "relative",
-    width: "100%",
-    maxWidth: 420,
-    padding: "32px",
-    borderRadius: 18,
-    background: "rgba(15,15,15,0.75)",
-    backdropFilter: "blur(20px)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    boxShadow: "0 30px 80px rgba(0,0,0,.8)",
-    color: "#fff",
-    zIndex: 1,
-  },
-  brand: {
-    fontFamily: "Orbitron, sans-serif",
-    fontSize: 26,
-    fontWeight: 700,
-    letterSpacing: 1.5,
-    textAlign: "center",
-  },
-  subtitle: {
-    textAlign: "center",
-    fontSize: 13,
-    opacity: 0.7,
-    marginBottom: 22,
-  },
-  error: {
-    background: "rgba(255,50,50,.15)",
-    border: "1px solid rgba(255,50,50,.3)",
-    padding: 10,
-    borderRadius: 10,
-    fontSize: 13,
-    marginBottom: 12,
-  },
-  googleBtn: {
-    width: "100%",
-    padding: "12px",
-    borderRadius: 12,
-    background: "#fff",
-    color: "#000",
-    fontWeight: 700,
-    border: "none",
-    cursor: "pointer",
-    transition: "all 0.25s ease",
-  },
-  divider: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    margin: "18px 0",
-    opacity: 0.5,
-    fontSize: 12,
-  },
-  divLine: {
-    height: 1,
-    background: "rgba(255,255,255,.18)",
-    flex: 1,
-  },
-  form: {
-    display: "grid",
-    gap: 12,
-  },
-  input: {
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,.12)",
-    background: "rgba(0,0,0,.4)",
-    color: "#fff",
-    outline: "none",
-    fontSize: 14,
-    transition: "all 0.25s ease",
-  },
-  loginBtn: {
-    marginTop: 6,
-    padding: "12px",
-    borderRadius: 12,
-    border: "none",
-    background: "linear-gradient(135deg, #6a5cff, #00d4ff)",
-    color: "#000",
-    fontWeight: 900,
-    cursor: "pointer",
-    transition: "all 0.25s ease",
-  },
-  footer: {
-    marginTop: 16,
-    textAlign: "center",
-    fontSize: 13,
-    opacity: 0.8,
-  },
-};
