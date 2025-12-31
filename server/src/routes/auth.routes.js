@@ -14,10 +14,9 @@ import { signAccessToken, signRefreshToken, hashToken } from "../utils/tokens.js
 import { requireAuth } from "../middlewares/auth.js";
 
 const router = Router();
-router.use(passport.initialize());
 
 /* =========================================================
-   Helpers
+   HELPERS (UBACI OVDE ✅)
 ========================================================= */
 function safeStr(x) {
   return String(x || "").trim();
@@ -33,22 +32,26 @@ function isHttpUrl(u) {
     return false;
   }
 }
-function isProd(req) {
-  // prod mode can still run locally; use NODE_ENV + https signal for cookies
-  const envProd = getEnv("NODE_ENV") === "production";
+function isHttpsReq(req) {
   const proto = safeStr(req.headers["x-forwarded-proto"]);
-  const isHttps = req.secure || proto.includes("https");
-  return envProd && isHttps;
+  return req.secure || proto.includes("https");
+}
+
+// Debug (AUTH_DEBUG=1)
+const AUTH_DEBUG = getEnv("AUTH_DEBUG") === "1";
+function dlog(...args) {
+  if (AUTH_DEBUG) console.log("[auth]", ...args);
 }
 
 /**
  * Allowlist redirect origins to prevent open redirect.
- * FRONTEND_URL is the main allowed origin.
+ * FRONTEND_URL is main allowed origin.
  * FRONTEND_ALLOWED_ORIGINS can add more, comma-separated.
  */
 function getAllowedOrigins() {
   const main = getEnv("FRONTEND_URL");
   const extra = getEnv("FRONTEND_ALLOWED_ORIGINS");
+
   const list = []
     .concat(main ? [main] : [])
     .concat(
@@ -60,12 +63,12 @@ function getAllowedOrigins() {
         : []
     )
     .map((o) => o.replace(/\/$/, ""));
+
   return Array.from(new Set(list));
 }
 function isAllowedOrigin(origin) {
   if (!origin) return false;
-  const o = origin.replace(/\/$/, "");
-  return getAllowedOrigins().includes(o);
+  return getAllowedOrigins().includes(origin.replace(/\/$/, ""));
 }
 
 /* =========================================================
@@ -79,14 +82,10 @@ const authLimiter = rateLimit({
 });
 
 /* =========================================================
-   Cookies
+   Cookie options (refresh token cookie)
 ========================================================= */
 function cookieOpts(req) {
-  const secure =
-    isProd(req) ||
-    safeStr(req.headers["x-forwarded-proto"]).includes("https") ||
-    req.secure;
-
+  const secure = isHttpsReq(req);
   return {
     httpOnly: true,
     secure,
@@ -97,20 +96,16 @@ function cookieOpts(req) {
 
 /* =========================================================
    FRONTEND CALLBACK URL builder
-
    Priority:
-   1) state.from OR query.from (must be allowed origin)
+   1) query.from (must be allowed origin)
    2) FRONTEND_CALLBACK_URL (full path)
    3) FRONTEND_URL + "/auth/callback"
    4) dev fallback localhost (only if NODE_ENV != production)
 ========================================================= */
-function resolveFrontendCallbackBase(req, stateObj = null) {
-  const qFrom = safeStr(req.query?.from);
-  const stFrom = safeStr(stateObj?.from);
-  const from = stFrom || qFrom;
-
-  if (from && isHttpUrl(from)) {
-    const origin = new URL(from).origin;
+function resolveFrontendCallbackBase(req) {
+  const fromRaw = safeStr(req.query?.from);
+  if (fromRaw && isHttpUrl(fromRaw)) {
+    const origin = new URL(fromRaw).origin;
     if (isAllowedOrigin(origin)) {
       return `${origin.replace(/\/$/, "")}/auth/callback`;
     }
@@ -122,66 +117,45 @@ function resolveFrontendCallbackBase(req, stateObj = null) {
   const fe = getEnv("FRONTEND_URL");
   if (fe && isHttpUrl(fe)) return `${fe.replace(/\/$/, "")}/auth/callback`;
 
-  if (getEnv("NODE_ENV") !== "production") {
-    return "http://localhost:5173/auth/callback";
-  }
+  if (getEnv("NODE_ENV") !== "production") return "http://localhost:5173/auth/callback";
 
   throw new Error("Missing FRONTEND_URL or FRONTEND_CALLBACK_URL in production.");
 }
 
-function buildFrontendCallbackUrl(req, accessToken, extra = {}, stateObj = null) {
-  const base = resolveFrontendCallbackBase(req, stateObj);
+function buildFrontendCallbackUrl(req, accessToken, extra = {}) {
+  const base = resolveFrontendCallbackBase(req);
   const u = new URL(base);
 
-  // do NOT set token if missing
   if (accessToken) u.searchParams.set("token", accessToken);
 
-  const next = safeStr(stateObj?.next) || safeStr(req.query?.next);
+  const next = safeStr(req.query?.next);
   if (next) u.searchParams.set("next", next);
 
   for (const [k, v] of Object.entries(extra)) {
-    if (v !== undefined && v !== null && String(v).length) {
-      u.searchParams.set(k, String(v));
-    }
+    if (v !== undefined && v !== null && String(v).length) u.searchParams.set(k, String(v));
   }
   return u.toString();
 }
 
 /* =========================================================
-   OAuth "state" (CSRF + carry from/next)
+   OAUTH STATE (CSRF) - FIX ✅
+   - state is random nonce
+   - cookie stores same nonce
+   - cookie path "/" so it's sent on callback
+   - sameSite "lax" (best for redirects)
 ========================================================= */
-function makeState(req) {
-  const from = safeStr(req.query?.from);
-  const next = safeStr(req.query?.next);
-  const nonce = crypto.randomBytes(16).toString("hex");
-
-  const secure =
-    isProd(req) ||
-    safeStr(req.headers["x-forwarded-proto"]).includes("https") ||
-    req.secure;
-
-  const stateCookieOpts = {
+function makeOAuthState() {
+  return crypto.randomBytes(16).toString("hex");
+}
+function oauthStateCookieOpts(req) {
+  const secure = isHttpsReq(req);
+  return {
     httpOnly: true,
     secure,
-    sameSite: secure ? "none" : "lax",
-    path: "/auth/google",
+    sameSite: "lax",
+    path: "/", // ✅ IMPORTANT
     maxAge: 10 * 60 * 1000,
   };
-
-  const obj = { from, next, nonce, t: Date.now() };
-  const raw = Buffer.from(JSON.stringify(obj)).toString("base64url");
-  return { raw, cookie: { name: "oauth_state", value: nonce, opts: stateCookieOpts } };
-}
-
-function parseState(raw) {
-  try {
-    const json = Buffer.from(String(raw || ""), "base64url").toString("utf8");
-    const obj = JSON.parse(json);
-    if (!obj || typeof obj !== "object") return null;
-    return obj;
-  } catch {
-    return null;
-  }
 }
 
 /* =========================================================
@@ -189,13 +163,7 @@ function parseState(raw) {
 ========================================================= */
 const GOOGLE_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
 const GOOGLE_CLIENT_SECRET = getEnv("GOOGLE_CLIENT_SECRET");
-const GOOGLE_CALLBACK_URL = getEnv(
-  "GOOGLE_CALLBACK_URL",
-  "http://localhost:5000/auth/google/callback"
-);
-
-// Optional: debug logs (set AUTH_DEBUG=1)
-const AUTH_DEBUG = getEnv("AUTH_DEBUG") === "1";
+const GOOGLE_CALLBACK_URL = getEnv("GOOGLE_CALLBACK_URL", "http://localhost:5000/auth/google/callback");
 
 if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
   passport.use(
@@ -216,10 +184,8 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
           if (!email) return done(new Error("Google profile missing email"));
           if (!providerId) return done(new Error("Google profile missing id"));
 
-          // find by providerId first
           let user = await User.findOne({ provider: "google", providerId });
 
-          // if not found: link by email OR create new
           if (!user) {
             const byEmail = await User.findOne({ email });
 
@@ -231,7 +197,6 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               await byEmail.save();
               user = byEmail;
             } else {
-              // schema needs passwordHash: create random
               const randomPass = `google_${Date.now()}_${Math.random().toString(16).slice(2)}`;
               const passwordHash = await bcrypt.hash(randomPass, 12);
 
@@ -247,7 +212,6 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               });
             }
           } else {
-            // refresh profile fields
             let changed = false;
             if (name && user.name !== name) {
               user.name = name;
@@ -267,10 +231,12 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
       }
     )
   );
+
+  dlog("Google OAuth enabled");
+  dlog("GOOGLE_CALLBACK_URL =", GOOGLE_CALLBACK_URL);
+  dlog("allowed origins =", getAllowedOrigins());
 } else {
-  if (AUTH_DEBUG) {
-    console.log("[auth] Google OAuth disabled: missing GOOGLE_CLIENT_ID/SECRET");
-  }
+  dlog("Google OAuth disabled: missing GOOGLE_CLIENT_ID/SECRET");
 }
 
 /* =========================================================
@@ -429,51 +395,86 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 });
 
 /* =========================================================
-   GOOGLE OAUTH ROUTES
+   GOOGLE OAUTH ROUTES (FIX ✅)
 ========================================================= */
 router.get("/google", (req, res, next) => {
-  if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-    return res.status(500).send("Google OAuth not configured (missing GOOGLE_CLIENT_ID/SECRET).");
+  try {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      return res.status(500).send("Google OAuth not configured (missing GOOGLE_CLIENT_ID/SECRET).");
+    }
+
+    // Validate "from" to prevent open redirects
+    const fromRaw = safeStr(req.query?.from);
+    let fromOrigin = "";
+
+    if (fromRaw && isHttpUrl(fromRaw)) {
+      try {
+        fromOrigin = new URL(fromRaw).origin;
+      } catch {
+        fromOrigin = "";
+      }
+    }
+
+    if (fromOrigin && !isAllowedOrigin(fromOrigin)) {
+      dlog("blocked from origin:", fromOrigin, "allowed:", getAllowedOrigins());
+      fromOrigin = "";
+    }
+
+    // state nonce
+    const state = makeOAuthState();
+
+    // store state cookie
+    res.cookie("oauth_state", state, oauthStateCookieOpts(req));
+
+    // prevent caching
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+
+    dlog("/auth/google https=", isHttpsReq(req));
+    dlog("set oauth_state cookie opts=", oauthStateCookieOpts(req));
+    dlog("state=", state);
+    dlog("fromOrigin=", fromOrigin || "(none)");
+
+    // normalize query.from if valid
+    if (fromOrigin) req.query.from = fromOrigin;
+    else delete req.query.from;
+
+    return passport.authenticate("google", {
+      session: false,
+      scope: ["email", "profile"],
+      prompt: "select_account",
+      state,
+    })(req, res, next);
+  } catch (e) {
+    next(e);
   }
-
-  const st = makeState(req);
-  res.cookie(st.cookie.name, st.cookie.value, st.cookie.opts);
-
-  if (AUTH_DEBUG) {
-    console.log("[auth] /auth/google from=", req.query?.from, "next=", req.query?.next);
-  }
-
-  return passport.authenticate("google", {
-    session: false,
-    scope: ["email", "profile"],
-    prompt: "select_account",
-    state: st.raw,
-  })(req, res, next);
 });
 
 router.get(
   "/google/callback",
   passport.authenticate("google", { session: false, failureRedirect: "/auth/google/failure" }),
   async (req, res) => {
-    const stateObj = parseState(req.query?.state);
-    const nonceCookie = safeStr(req.cookies?.oauth_state);
+    const stateFromQuery = safeStr(req.query?.state);
+    const stateFromCookie = safeStr(req.cookies?.oauth_state);
 
-    res.clearCookie("oauth_state", { ...cookieOpts(req), path: "/auth/google" });
+    // clear cookie regardless
+    res.clearCookie("oauth_state", { path: "/" });
 
-    if (!stateObj || !stateObj.nonce || !nonceCookie || stateObj.nonce !== nonceCookie) {
-      const redirectTo = buildFrontendCallbackUrl(req, null, { error: "oauth_state_invalid" }, stateObj);
+    dlog("/auth/google/callback state(query)=", stateFromQuery);
+    dlog("/auth/google/callback state(cookie)=", stateFromCookie);
+    dlog("req.user exists?", !!req.user);
+
+    if (!stateFromQuery || !stateFromCookie || stateFromQuery !== stateFromCookie) {
+      const redirectTo = buildFrontendCallbackUrl(req, null, { error: "oauth_state_invalid" });
+      dlog("oauth_state_invalid ->", redirectTo);
       return res.redirect(302, redirectTo);
     }
 
     const user = req.user;
 
-    if (AUTH_DEBUG) {
-      console.log("[auth] google callback user=", user);
-      console.log("[auth] resolved callback base=", resolveFrontendCallbackBase(req, stateObj));
-    }
-
     if (!user?._id) {
-      const redirectTo = buildFrontendCallbackUrl(req, null, { error: "google_user_id_missing" }, stateObj);
+      const redirectTo = buildFrontendCallbackUrl(req, null, { error: "google_user_id_missing" });
+      dlog("google_user_id_missing ->", redirectTo);
       return res.redirect(302, redirectTo);
     }
 
@@ -483,13 +484,15 @@ router.get(
       role: user.role,
     });
 
-    const redirectTo = buildFrontendCallbackUrl(req, accessToken, {}, stateObj);
+    const redirectTo = buildFrontendCallbackUrl(req, accessToken);
+    dlog("success ->", redirectTo);
+
     return res.redirect(302, redirectTo);
   }
 );
 
 router.get("/google/failure", (req, res) => {
-  if (AUTH_DEBUG) console.log("[auth] google failure query=", req.query);
+  dlog("google failure query=", req.query);
   res
     .status(401)
     .set("Content-Type", "text/html")
@@ -497,6 +500,19 @@ router.get("/google/failure", (req, res) => {
       <h2>Google login failed</h2>
       <p>Please try again.</p>
     </body></html>`);
+});
+
+/* =========================================================
+   DEBUG (optional)
+========================================================= */
+router.get("/debug/cookies", (req, res) => {
+  res.json({
+    ok: true,
+    https: isHttpsReq(req),
+    cookies: req.cookies || {},
+    query: req.query || {},
+    allowedOrigins: getAllowedOrigins(),
+  });
 });
 
 export default router;
