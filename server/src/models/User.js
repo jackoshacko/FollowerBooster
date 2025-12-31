@@ -10,39 +10,31 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
       index: true,
-      maxlength: 254,
-      validate: {
-        validator: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "")),
-        message: "Invalid email format",
-      },
     },
 
-    passwordHash: {
-      type: String,
-      required: true,
-      minlength: 10,
-      select: false, // ✅ default ne vraćaj passwordHash iz query-a
-    },
+    // ✅ for local auth (email+password)
+    passwordHash: { type: String, required: true },
 
-    role: { type: String, enum: ["user", "admin"], default: "user", index: true },
+    // ✅ oauth mapping
+    provider: { type: String, enum: ["local", "google"], default: "local", index: true },
+    providerId: { type: String, default: "", index: true }, // google profile.id
+
+    // ✅ optional profile
+    name: { type: String, default: "", trim: true },
+    avatarUrl: { type: String, default: "" },
+
+    // role-based access
+    role: { type: String, enum: ["user", "admin"], default: "user" },
 
     balance: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );
 
-// ✅ extra index (nije obavezno ali je profi)
-userSchema.index({ email: 1 }, { unique: true });
-
-// ✅ safe JSON output (nikad ne leakuj passwordHash)
-userSchema.set("toJSON", {
-  transform: function (_doc, ret) {
-    delete ret.passwordHash;
-    ret.id = String(ret._id);
-    delete ret._id;
-    delete ret.__v;
-    return ret;
-  },
-});
+// ✅ allow multiple users without providerId, but unique when providerId exists
+userSchema.index(
+  { provider: 1, providerId: 1 },
+  { unique: true, partialFilterExpression: { providerId: { $type: "string", $ne: "" } } }
+);
 
 export const User = mongoose.model("User", userSchema);

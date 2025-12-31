@@ -1,5 +1,6 @@
 // server/src/routes/me.routes.js
 import { Router } from "express";
+import mongoose from "mongoose";
 import { requireAuth } from "../middlewares/auth.js";
 import { User } from "../models/User.js";
 import { Order } from "../models/Order.js";
@@ -11,27 +12,40 @@ function round2(n) {
   return Math.round(x * 100) / 100;
 }
 
-// POSTOJI: GET /api/me
+function requireMongoId(req, res) {
+  const userId = String(req.user?.id || "").trim();
+  if (!mongoose.isValidObjectId(userId)) {
+    res.status(401).json({ message: "Invalid user id" });
+    return null;
+  }
+  return userId;
+}
+
+// GET /api/me (token-only)
 router.get("/me", requireAuth, (req, res) => {
   res.json({
     id: req.user.id,
+    email: req.user.email,
     role: req.user.role,
+    balance: req.user.balance,
+    name: req.user.name || "",
+    avatarUrl: req.user.avatarUrl || "",
   });
 });
 
 /**
- * NEW: GET /api/dashboard
- * User dashboard stats (brzo, bez listanja svih ordera)
- * returns:
+ * GET /api/dashboard
  * - balance
  * - activeOrders
  * - spent30d
  */
 router.get("/dashboard", requireAuth, async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = requireMongoId(req, res);
+    if (!userId) return;
 
-    // 30 dana unazad
+    const userObjectId = new mongoose.Types.ObjectId(userId);
+
     const now = new Date();
     const d30 = new Date(now);
     d30.setDate(d30.getDate() - 30);
@@ -39,16 +53,14 @@ router.get("/dashboard", requireAuth, async (req, res, next) => {
     const [user, activeOrders, spentAgg] = await Promise.all([
       User.findById(userId).select("balance"),
       Order.countDocuments({
-        userId,
+        userId: userObjectId, // ✅ always ObjectId for consistency
         status: { $in: ["pending", "processing"] },
       }),
       Order.aggregate([
         {
           $match: {
-            userId: typeof userId === "string" ? new (await import("mongoose")).default.Types.ObjectId(userId) : userId,
+            userId: userObjectId, // ✅ safe
             createdAt: { $gte: d30 },
-            // spent = ono što je realno plaćeno/rezervisano
-            // izbacujemo failed/canceled
             status: { $in: ["pending", "processing", "completed"] },
           },
         },
