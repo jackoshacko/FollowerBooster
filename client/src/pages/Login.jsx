@@ -115,7 +115,7 @@ export default function Login() {
       localStorage.setItem("role", role || "user");
 
       if (!remember) {
-        // (optional future: switch token storage to sessionStorage)
+        // optional future: move token to sessionStorage
       }
 
       window.dispatchEvent(new Event("auth-changed"));
@@ -138,8 +138,13 @@ export default function Login() {
   }
 
   function googleLogin() {
-    const q = next ? `?next=${encodeURIComponent(next)}` : "";
-    window.location.href = apiUrl(`/auth/google${q}`);
+    // ✅ IMPORTANT: send frontend origin so backend can redirect back correctly (no localhost on phone)
+    const from = typeof window !== "undefined" ? window.location.origin : "";
+    const params = new URLSearchParams();
+    if (from) params.set("from", from);
+    if (next) params.set("next", next);
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    window.location.href = apiUrl(`/auth/google${qs}`);
   }
 
   const canSubmit = isValidEmail(email) && password.length > 0 && !loading;
