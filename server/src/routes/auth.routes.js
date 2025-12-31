@@ -5,7 +5,6 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import crypto from "crypto";
 
 import { User } from "../models/User.js";
 import { RefreshSession } from "../models/RefreshSession.js";
@@ -13,105 +12,10 @@ import { signAccessToken, signRefreshToken, hashToken } from "../utils/tokens.js
 import { requireAuth } from "../middlewares/auth.js";
 
 const router = Router();
-
-/* =========================================================
-   Passport init (router-scoped)
-========================================================= */
 router.use(passport.initialize());
 
 /* =========================================================
-   Helpers (safe)
-========================================================= */
-function safeStr(x) {
-  return String(x ?? "").trim();
-}
-
-function getEnv(name, fallback = "") {
-  return safeStr(process.env[name] ?? fallback);
-}
-
-function isEmailLike(email) {
-  const e = safeStr(email).toLowerCase();
-  // simple + safe email check
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-}
-
-function normalizeEmail(email) {
-  return safeStr(email).toLowerCase();
-}
-
-function clientIp(req) {
-  // if behind proxy, set app.set("trust proxy", 1) in app.js
-  return (
-    req.headers["x-forwarded-for"]?.toString().split(",")[0]?.trim() ||
-    req.ip ||
-    ""
-  );
-}
-
-function currentBaseUrl(req) {
-  // Prefer explicit env for prod/ngrok
-  const pub = getEnv("BACKEND_PUBLIC_URL");
-  if (pub) return pub.replace(/\/$/, "");
-
-  // fallback (local)
-  const proto =
-    req.headers["x-forwarded-proto"]?.toString().split(",")[0]?.trim() ||
-    (req.secure ? "https" : "http");
-  const host = req.headers["x-forwarded-host"]?.toString() || req.headers.host;
-  return `${proto}://${host}`.replace(/\/$/, "");
-}
-
-function frontendBaseUrl() {
-  // main FE base (not callback)
-  return getEnv("FRONTEND_URL", "http://localhost:5173").replace(/\/$/, "");
-}
-
-function frontendCallbackBase() {
-  // FE callback route
-  return getEnv(
-    "FRONTEND_CALLBACK_URL",
-    `${frontendBaseUrl()}/auth/callback`
-  );
-}
-
-function buildFrontendCallbackUrl(params = {}) {
-  const base = frontendCallbackBase();
-  const u = new URL(base);
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && String(v).length > 0) {
-      u.searchParams.set(k, String(v));
-    }
-  });
-  return u.toString();
-}
-
-/* =========================================================
-   Cookie options (refresh token cookie)
-   - Dev on http: secure=false, sameSite=lax
-   - Prod/ngrok: secure=true, sameSite=none (if cross-site)
-========================================================= */
-function cookieOpts(req) {
-  const nodeEnv = getEnv("NODE_ENV", "development");
-  const isProd = nodeEnv === "production";
-
-  // If your FE is on different domain (Vercel) and backend on ngrok,
-  // cookie would need SameSite=None + Secure=true. BUT your FE uses
-  // credentials:"omit" so cookie refresh is basically unused for FE.
-  // Still: keep it correct + safe.
-  const wantsCrossSite = isProd; // best guess
-
-  return {
-    httpOnly: true,
-    secure: wantsCrossSite, // true in prod
-    sameSite: wantsCrossSite ? "none" : "lax",
-    path: "/",
-    // optional: set maxAge to match refresh expiration
-  };
-}
-
-/* =========================================================
-   Rate limiters (anti-spam / anti-bruteforce)
+   Rate limit (auth endpoints)
 ========================================================= */
 const authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -120,60 +24,78 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const loginLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 10, // stricter
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+/* =========================================================
+   Helpers
+========================================================= */
+function safeStr(x) {
+  return String(x || "").trim();
+}
+function getEnv(name, fallback = "") {
+  return safeStr(process.env[name] || fallback);
+}
 
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 8,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// ✅ build FE redirect (token or error)
+function buildFrontendCallbackUrl({ token = "", error = "" } = {}) {
+  const base = getEnv("FRONTEND_CALLBACK_URL", "http://localhost:5173/auth/callback");
+  const u = new URL(base);
+  if (token) u.searchParams.set("token", token);
+  if (error) u.searchParams.set("error", error);
+  return u.toString();
+}
 
-const googleLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// ✅ cookie opts (refresh cookie optional; FE ti je token-only)
+function cookieOpts(req) {
+  const isProd = getEnv("NODE_ENV") === "production";
+  const isHttps = (req?.headers?.["x-forwarded-proto"] || "").includes("https");
+  const secure = isProd || isHttps;
+
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: secure ? "none" : "lax",
+    path: "/",
+  };
+}
+
+function normalizeEmail(email) {
+  return safeStr(email).toLowerCase();
+}
+
+function isStrongPassword(pw) {
+  const s = String(pw || "");
+  if (s.length < 8) return false;
+  return true;
+}
 
 /* =========================================================
-   GOOGLE OAUTH STRATEGY
+   GOOGLE OAUTH
 ========================================================= */
 const GOOGLE_CLIENT_ID = getEnv("GOOGLE_CLIENT_ID");
 const GOOGLE_CLIENT_SECRET = getEnv("GOOGLE_CLIENT_SECRET");
+const GOOGLE_CALLBACK_URL = getEnv(
+  "GOOGLE_CALLBACK_URL",
+  "http://localhost:5000/auth/google/callback"
+);
 
-// We don't hardcode callback here — we build it from request (works on localhost/ngrok)
 if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
   passport.use(
     new GoogleStrategy(
       {
         clientID: GOOGLE_CLIENT_ID,
         clientSecret: GOOGLE_CLIENT_SECRET,
-        callbackURL: "/auth/google/callback", // relative: uses currentBaseUrl(req) internally
+        callbackURL: GOOGLE_CALLBACK_URL,
         passReqToCallback: true,
       },
-      async (req, accessToken, refreshToken, profile, done) => {
+      async (_req, _accessToken, _refreshToken, profile, done) => {
         try {
-          const email = safeStr(profile?.emails?.[0]?.value).toLowerCase();
-          const googleId = safeStr(profile?.id);
+          const email = normalizeEmail(profile?.emails?.[0]?.value);
+          if (!email) return done(null, false, { message: "google_missing_email" });
 
-          if (!email) {
-            return done(null, false, { message: "Google profile missing email" });
-          }
-
-          // find user by email
-          let user = await User.findOne({ email });
-
+          // find
+          let user = await User.findOne({ email }).select("+passwordHash");
           if (!user) {
-            // create user with random passwordHash (so they can still later set password)
-            const randomPass = `google_${Date.now()}_${crypto
-              .randomBytes(8)
-              .toString("hex")}`;
+            // create "random" passwordHash (user won't use it; google-only)
+            const randomPass = `google_${Date.now()}_${Math.random().toString(16).slice(2)}`;
             const passwordHash = await bcrypt.hash(randomPass, 12);
 
             user = await User.create({
@@ -181,10 +103,12 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
               passwordHash,
               role: "user",
               balance: 0,
-              // optional fields if your schema supports it:
-              // googleId,
-              // name: safeStr(profile?.displayName),
             });
+          }
+
+          // ✅ MUST have _id
+          if (!user?._id) {
+            return done(null, false, { message: "google_user_id_missing" });
           }
 
           return done(null, user);
@@ -199,51 +123,42 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
 /* =========================================================
    REGISTER
 ========================================================= */
-router.post("/register", registerLimiter, async (req, res, next) => {
+router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { email, password, name } = req.body || {};
-
-    if (!email || !password) {
-      return res.status(400).json({ message: "email and password required" });
-    }
-
     const normalizedEmail = normalizeEmail(email);
 
-    if (!isEmailLike(normalizedEmail)) {
-      return res.status(400).json({ message: "invalid email" });
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({ message: "email and password required" });
     }
-
-    const pass = String(password || "");
-    if (pass.length < 8) {
+    if (!isStrongPassword(password)) {
       return res.status(400).json({ message: "password must be at least 8 chars" });
     }
 
     const exists = await User.findOne({ email: normalizedEmail });
     if (exists) return res.status(409).json({ message: "email already exists" });
 
-    const passwordHash = await bcrypt.hash(pass, 12);
+    const passwordHash = await bcrypt.hash(String(password), 12);
 
     const user = await User.create({
       email: normalizedEmail,
       passwordHash,
       role: "user",
       balance: 0,
-      // optional if schema supports:
-      // name: safeStr(name).slice(0, 80) || undefined,
+      // name is optional (ako ti schema nema name, samo ignore)
+      ...(name ? { name: safeStr(name).slice(0, 80) } : {}),
     });
 
-    // If you want auto-login after register (optional):
-    // const accessToken = signAccessToken({ id: String(user._id), email: user.email, role: user.role });
-    // return res.json({ ok:true, accessToken, user:{...} });
+    // optional: auto-login posle registracije (ako hoćeš)
+    const accessToken = signAccessToken({
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+    });
 
     return res.json({
-      ok: true,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        balance: user.balance,
-      },
+      accessToken,
+      user: { id: user._id, email: user.email, role: user.role, balance: user.balance },
     });
   } catch (e) {
     next(e);
@@ -253,49 +168,39 @@ router.post("/register", registerLimiter, async (req, res, next) => {
 /* =========================================================
    LOGIN
 ========================================================= */
-router.post("/login", loginLimiter, async (req, res, next) => {
+router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
     const normalizedEmail = normalizeEmail(email);
 
-    if (!isEmailLike(normalizedEmail)) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const user = await User.findOne({ email: normalizedEmail });
+    const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash");
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
     const ok = await bcrypt.compare(String(password || ""), user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
 
     const accessToken = signAccessToken({
-      id: String(user._id),
+      id: user._id.toString(),
       email: user.email,
       role: user.role,
     });
 
-    // refresh token (optional)
-    const refreshToken = signRefreshToken({ id: String(user._id) });
+    const refreshToken = signRefreshToken({ id: user._id.toString() });
 
     await RefreshSession.create({
       userId: user._id,
       tokenHash: hashToken(refreshToken),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       userAgent: req.headers["user-agent"] || "",
-      ip: clientIp(req),
+      ip: req.headers["x-forwarded-for"] || req.ip || "",
     });
 
-    // cookie (optional)
+    // cookie optional
     res.cookie("refreshToken", refreshToken, cookieOpts(req));
 
     return res.json({
       accessToken,
-      user: {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-        balance: user.balance,
-      },
+      user: { id: user._id, email: user.email, role: user.role, balance: user.balance },
     });
   } catch (e) {
     next(e);
@@ -305,7 +210,7 @@ router.post("/login", loginLimiter, async (req, res, next) => {
 /* =========================================================
    REFRESH (cookie-based)
 ========================================================= */
-router.post("/refresh", authLimiter, async (req, res) => {
+router.post("/refresh", async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
   if (!refreshToken) return res.status(401).json({ message: "No refresh token" });
 
@@ -321,7 +226,6 @@ router.post("/refresh", authLimiter, async (req, res) => {
 
     if (!session) return res.status(401).json({ message: "Refresh revoked" });
 
-    // rotate refresh token
     session.revokedAt = new Date();
     await session.save();
 
@@ -332,16 +236,16 @@ router.post("/refresh", authLimiter, async (req, res) => {
       tokenHash: hashToken(newRefresh),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       userAgent: req.headers["user-agent"] || "",
-      ip: clientIp(req),
+      ip: req.headers["x-forwarded-for"] || req.ip || "",
     });
 
     res.cookie("refreshToken", newRefresh, cookieOpts(req));
 
-    const user = await User.findById(payload.id).select("_id email role");
+    const user = await User.findById(payload.id);
     if (!user) return res.status(401).json({ message: "User not found" });
 
     const accessToken = signAccessToken({
-      id: String(user._id),
+      id: user._id.toString(),
       email: user.email,
       role: user.role,
     });
@@ -376,22 +280,12 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 /* =========================================================
    GOOGLE OAUTH ROUTES
 ========================================================= */
-
-// Start Google login
-router.get("/google", googleLimiter, (req, res, next) => {
+router.get("/google", (req, res, next) => {
   if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
     return res
       .status(500)
       .send("Google OAuth not configured (missing GOOGLE_CLIENT_ID/SECRET).");
   }
-
-  // Make sure callback resolves to the correct base (localhost or ngrok)
-  const base = currentBaseUrl(req);
-  // passport google uses callbackURL from strategy as "/auth/google/callback"
-  // but Google must have the absolute URL whitelisted in Google Console.
-  // Your env should match base. If not, you must update Google console redirect.
-  // (We'll still proceed.)
-  req._oauthBase = base;
 
   return passport.authenticate("google", {
     session: false,
@@ -400,10 +294,8 @@ router.get("/google", googleLimiter, (req, res, next) => {
   })(req, res, next);
 });
 
-// Callback
 router.get(
   "/google/callback",
-  googleLimiter,
   (req, res, next) => {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       return res
@@ -412,18 +304,16 @@ router.get(
     }
     return next();
   },
-  passport.authenticate("google", { session: false, failureRedirect: "/auth/google/failure" }),
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: "/auth/google/failure",
+  }),
   async (req, res) => {
     try {
       const user = req.user;
 
-      // ✅ NEVER crash here
-      if (!user) {
-        const redirectTo = buildFrontendCallbackUrl({ error: "google_user_missing" });
-        return res.redirect(302, redirectTo);
-      }
-
-      const userId = user?._id ? String(user._id) : "";
+      // ✅ bulletproof id extraction
+      const userId = user?._id?.toString?.() || user?.id?.toString?.();
       if (!userId) {
         const redirectTo = buildFrontendCallbackUrl({ error: "google_user_id_missing" });
         return res.redirect(302, redirectTo);
@@ -431,8 +321,8 @@ router.get(
 
       const accessToken = signAccessToken({
         id: userId,
-        email: user.email || "",
-        role: user.role || "user",
+        email: user.email,
+        role: user.role,
       });
 
       const redirectTo = buildFrontendCallbackUrl({ token: accessToken });
@@ -444,10 +334,14 @@ router.get(
   }
 );
 
-// Failure (redirect to FE for nicer UX)
 router.get("/google/failure", (req, res) => {
-  const redirectTo = buildFrontendCallbackUrl({ error: "google_login_failed" });
-  return res.redirect(302, redirectTo);
+  res
+    .status(401)
+    .set("Content-Type", "text/html")
+    .send(`<!doctype html><html><body style="font-family:system-ui;background:#0a0a0a;color:#fff;padding:24px">
+      <h2>Google login failed</h2>
+      <p>Please try again.</p>
+    </body></html>`);
 });
 
 export default router;
