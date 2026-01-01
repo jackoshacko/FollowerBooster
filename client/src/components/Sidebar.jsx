@@ -16,6 +16,7 @@ import {
   ChevronsRight,
   Sparkles,
   Bell,
+  Settings,
   BadgeCheck,
   AlertCircle,
   Clock,
@@ -25,8 +26,10 @@ import {
   Mail,
   X,
 } from "lucide-react";
+
 import { api, setToken, setUser } from "../lib/api.js";
 
+/* ===================== helpers ===================== */
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
 }
@@ -37,8 +40,6 @@ const IS_IOS =
   !window.MSStream;
 
 const DISABLE_BLUR_ON_IOS = IS_IOS;
-
-/* ================= UI atoms ================= */
 
 function RenderIcon({ icon, className }) {
   if (!icon) return null;
@@ -107,7 +108,8 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
       className={({ isActive }) =>
         cls(
           "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition",
-          "border overflow-hidden select-none focus:outline-none",
+          "border overflow-hidden select-none",
+          "focus:outline-none",
           isActive
             ? cls(
                 "border-white/12 bg-white/10 text-white",
@@ -207,8 +209,59 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
-/* ================= Shell ================= */
+/* ===================== Mobile Drawer (FIXED) ===================== */
+function MobileDrawer({ open, onClose, children }) {
+  useEffect(() => {
+    if (!open) return;
 
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+
+    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
+
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] md:hidden">
+      {/* overlay */}
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/75"
+        onClick={onClose}
+        aria-label="Close sidebar"
+      />
+
+      {/* panel */}
+      <div className="absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]">
+        <div className="h-full animate-[sbIn_.18s_ease-out]">
+          <style>{`
+            @keyframes sbIn {
+              from { transform: translateX(-14px); opacity: .98; }
+              to { transform: translateX(0); opacity: 1; }
+            }
+          `}</style>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== Sidebar Shell ===================== */
 function SidebarShell({
   children,
   collapsed,
@@ -222,38 +275,34 @@ function SidebarShell({
   mobile,
   onClose,
 }) {
+  // ✅ iOS + mobile: solid background (no blur fog)
   const glass = mobile
-    ? DISABLE_BLUR_ON_IOS
-      ? "bg-zinc-950/95"
-      : "bg-zinc-950/90 backdrop-blur-2xl"
+    ? "bg-zinc-950"
     : DISABLE_BLUR_ON_IOS
-    ? "bg-black/65"
-    : "bg-black/45 backdrop-blur-xl";
+    ? "bg-black/60"
+    : "bg-black/35 backdrop-blur-xl";
 
   return (
     <aside
       className={cls(
-        "relative border-r border-white/10 p-4",
+        "relative z-[10000] p-4",
+        "border-r border-white/10",
         glass,
-        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
-        "overflow-x-clip"
+        "shadow-[0_25px_90px_rgba(0,0,0,0.75)]",
+        "overflow-x-clip",
+        mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : collapsed ? "w-[98px]" : "w-[310px]",
+        mobile ? "pt-[max(env(safe-area-inset-top),16px)]" : ""
       )}
-      style={{
-        width: mobile ? "min(86vw, 360px)" : collapsed ? 98 : 310,
-        height: mobile ? "100dvh" : "100vh",
-        paddingTop: mobile ? "max(env(safe-area-inset-top),16px)" : undefined,
-        WebkitOverflowScrolling: "touch",
-      }}
     >
-      {/* Stable background so it never becomes durchsichtig while scrolling */}
+      {/* subtle glows (safe) */}
       <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute inset-0 bg-zinc-950/40" />
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.08),transparent_70%)]" />
       </div>
 
-      <div className="mb-4 flex items-center justify-between">
+      {/* header */}
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div
             className={cls(
@@ -277,6 +326,7 @@ function SidebarShell({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* mobile close */}
           {mobile ? (
             <button
               onClick={onClose}
@@ -308,6 +358,7 @@ function SidebarShell({
             </button>
           )}
 
+          {/* logout */}
           <button
             onClick={onLogout}
             className={cls(
@@ -328,8 +379,11 @@ function SidebarShell({
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-      {/* One internal scroll only */}
-      <div className="mt-3 flex flex-col min-h-0" style={{ height: mobile ? "calc(100dvh - 140px)" : "calc(100vh - 140px)" }}>
+      {/* ✅ internal scroll only for sidebar content */}
+      <div
+        className="mt-3 flex flex-col min-h-0"
+        style={{ height: mobile ? "calc(100dvh - 140px)" : "calc(100vh - 140px)" }}
+      >
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
@@ -339,60 +393,7 @@ function SidebarShell({
   );
 }
 
-/* ================= Mobile Drawer ================= */
-
-function MobileDrawer({ open, onClose, children }) {
-  useEffect(() => {
-    if (!open) return;
-    const prevOverflow = document.body.style.overflow;
-    const prevPaddingRight = document.body.style.paddingRight;
-    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
-
-    document.body.style.overflow = "hidden";
-    if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
-
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      document.body.style.paddingRight = prevPaddingRight;
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[9999] md:hidden">
-      {/* overlay */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/70"
-        onClick={onClose}
-        aria-label="Close sidebar"
-      />
-      {/* panel */}
-      <div
-        className="absolute left-0 top-0 z-[10000] h-[100dvh] w-[min(86vw,360px)]"
-        style={{ animation: "sbSlideIn .18s ease-out" }}
-      >
-        <style>{`
-          @keyframes sbSlideIn {
-            from { transform: translateX(-10px); opacity: .98; }
-            to   { transform: translateX(0); opacity: 1; }
-          }
-        `}</style>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/* ================= Component ================= */
-
+/* ===================== main component ===================== */
 export default function Sidebar({ mobileOpen = false, onClose }) {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -441,6 +442,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     onClose?.();
   };
 
+  // Load /api/me only if token exists
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -696,7 +698,10 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
           onClick={() => navClick("/orders")}
           right={
             authed && myOrdersCount !== null ? (
-              <Badge title="Your orders" tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}>
+              <Badge
+                title="Your orders"
+                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
+              >
                 {myOrdersCount}
               </Badge>
             ) : null
@@ -756,14 +761,9 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     </>
   );
 
-  // ✅ Desktop: FIXED sidebar (no transparency glitch on scroll)
+  // Desktop sidebar (sticky)
   const desktop = (
-    <div
-      className={cls(
-        "hidden md:block",
-        "fixed left-0 top-0 z-[50] h-screen"
-      )}
-    >
+    <div className="hidden md:block sticky top-0 h-screen">
       <SidebarShell
         mobile={false}
         collapsed={collapsed}
@@ -780,7 +780,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     </div>
   );
 
-  // ✅ Mobile: real drawer above EVERYTHING
+  // Mobile drawer (overlay)
   const mobile = (
     <MobileDrawer open={mobileOpen} onClose={onClose}>
       <SidebarShell
