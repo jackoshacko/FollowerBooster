@@ -1,3 +1,4 @@
+// client/src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -23,12 +24,78 @@ import {
   LifeBuoy,
   FileText,
   Mail,
+  X,
 } from "lucide-react";
 
 import { api, setToken, setUser } from "../lib/api.js";
 
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
+}
+
+// iOS blur zna da glitčuje → fallback
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent || "") &&
+  typeof window !== "undefined";
+
+const BLUR = IS_IOS ? "" : "backdrop-blur-xl";
+
+function useBodyScrollLock(locked) {
+  useEffect(() => {
+    if (!locked) return;
+    const body = document.body;
+    const html = document.documentElement;
+    const y = window.scrollY || 0;
+
+    body.dataset.scrollY = String(y);
+    body.style.overflow = "hidden";
+    body.style.position = "fixed";
+    body.style.top = `-${y}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    html.style.overscrollBehavior = "none";
+
+    return () => {
+      const yy = Number(body.dataset.scrollY || "0");
+      body.style.overflow = "";
+      body.style.position = "";
+      body.style.top = "";
+      body.style.left = "";
+      body.style.right = "";
+      body.style.width = "";
+      html.style.overscrollBehavior = "";
+      window.scrollTo(0, yy);
+    };
+  }, [locked]);
+}
+
+function MobileDrawer({ open, onClose, children }) {
+  useBodyScrollLock(open);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && onClose?.();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[999] md:hidden">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/70"
+        onClick={onClose}
+        aria-label="Close sidebar"
+      />
+      <div className="absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]">
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function RenderIcon({ icon, className }) {
@@ -55,7 +122,7 @@ function Badge({ children, tone = "zinc", title }) {
       title={title}
       className={cls(
         "ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        "backdrop-blur-xl",
+        BLUR,
         toneCls
       )}
     >
@@ -79,7 +146,7 @@ function Chip({ children, tone = "neutral", title }) {
       title={title}
       className={cls(
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        "backdrop-blur-xl",
+        BLUR,
         tones[tone] || tones.neutral
       )}
     >
@@ -134,7 +201,7 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
           <span
             className={cls(
               "grid h-9 w-9 place-items-center rounded-2xl border shrink-0 transition",
-              "backdrop-blur-xl",
+              BLUR,
               isActive
                 ? "border-white/14 bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_10px_35px_rgba(168,85,247,0.20)]"
                 : "border-white/10 bg-white/5 group-hover:bg-white/10"
@@ -145,15 +212,6 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
 
           {!collapsed ? <span className="font-semibold tracking-tight">{label}</span> : null}
           {!collapsed && right ? right : null}
-
-          <span
-            className={cls(
-              "pointer-events-none absolute -inset-10 opacity-0 transition",
-              "bg-gradient-to-r from-white/0 via-white/10 to-white/0",
-              "rotate-12",
-              "group-hover:opacity-100"
-            )}
-          />
         </>
       )}
     </NavLink>
@@ -165,7 +223,12 @@ function Section({ title, icon, collapsed, children }) {
     <div className="mt-5">
       {!collapsed ? (
         <div className="mb-2 flex items-center gap-2 px-2">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80 backdrop-blur-xl">
+          <span
+            className={cls(
+              "inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80",
+              BLUR
+            )}
+          >
             {icon ? <RenderIcon icon={icon} className="h-3.5 w-3.5" /> : null}
             <span>{title}</span>
           </span>
@@ -191,15 +254,16 @@ function SidebarShell({
   statusPills,
   footer,
   mobile,
+  onClose,
 }) {
   return (
     <aside
       className={cls(
         "relative p-4",
-        mobile ? "h-[100dvh]" : "h-screen",
+        mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : "h-screen",
         mobile
-          ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
-          : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
+          ? `border-r border-white/10 bg-zinc-950/95 ${IS_IOS ? "" : "backdrop-blur-2xl"}`
+          : `border-r border-white/10 bg-black/35 ${IS_IOS ? "" : "backdrop-blur-xl"}`,
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         "overflow-x-clip",
         collapsed ? "w-[98px]" : "w-[310px]"
@@ -213,46 +277,65 @@ function SidebarShell({
 
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0 backdrop-blur-xl">
+          <div
+            className={cls(
+              "grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0",
+              BLUR
+            )}
+          >
             <span className="text-xs font-black tracking-tight text-white">FB</span>
           </div>
 
           {!collapsed ? (
             <div className="leading-tight min-w-0">
-              <div className="text-sm font-extrabold tracking-tight text-white truncate">
-                {title || "FollowerBooster"}
-              </div>
-              <div className="text-xs text-zinc-200/60 truncate">
-                {loading ? "Loading…" : subtitle || "Authenticated"}
-              </div>
+              <div className="text-sm font-extrabold tracking-tight text-white truncate">{title || "FollowerBooster"}</div>
+              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
             </div>
           ) : null}
         </div>
 
         <div className="flex items-center gap-2">
-          {!mobile ? (
+          {mobile ? (
+            <button
+              onClick={onClose}
+              className={cls(
+                "inline-flex items-center justify-center rounded-2xl p-2",
+                "border border-white/10 bg-white/5 text-zinc-100/80",
+                BLUR,
+                "hover:bg-white/10 hover:text-white transition"
+              )}
+              title="Close"
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : (
             <button
               onClick={() => setCollapsed((v) => !v)}
               className={cls(
                 "inline-flex items-center justify-center rounded-2xl p-2",
-                "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
+                "border border-white/10 bg-white/5 text-zinc-100/80",
+                BLUR,
                 "hover:bg-white/10 hover:text-white transition",
                 "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
               )}
               title={collapsed ? "Expand" : "Collapse"}
+              type="button"
             >
               {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
             </button>
-          ) : null}
+          )}
 
           <button
             onClick={onLogout}
             className={cls(
               "inline-flex items-center justify-center rounded-2xl p-2",
-              "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
+              "border border-white/10 bg-white/5 text-zinc-100/80",
+              BLUR,
               "hover:bg-white/10 hover:text-white transition"
             )}
             title="Logout"
+            type="button"
           >
             <LogOut className="h-4 w-4" />
           </button>
@@ -260,14 +343,14 @@ function SidebarShell({
       </div>
 
       {!collapsed && statusPills ? <div className="mb-3 flex flex-wrap gap-2">{statusPills}</div> : null}
-
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
       <div className="mt-3 flex flex-col min-h-0">
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
-        {footer ? <div className="mt-3">{footer}</div> : null}
+
+        {footer ? <div className="mt-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">{footer}</div> : null}
       </div>
     </aside>
   );
@@ -286,26 +369,23 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
-export default function Sidebar({ mobile = false, onClose }) {
+// ✅ shared logic/content (da ne dupliramo)
+function useSidebarData(onClose) {
   const navigate = useNavigate();
   const loc = useLocation();
 
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sb_collapsed") === "1");
-
   const [me, setMe] = useState(null);
   const [adminStats, setAdminStats] = useState(null);
   const [myOrdersCount, setMyOrdersCount] = useState(null);
-
   const [walletSnap, setWalletSnap] = useState({ balance: null, currency: "EUR" });
   const [opsSnap, setOpsSnap] = useState({ active: null, pending: null, processing: null, failed: null });
-
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(true);
   const pollRef = useRef(null);
 
   const isAdmin = me?.role === "admin";
   const isOnAdmin = loc.pathname.startsWith("/admin");
-
   const authed = !!localStorage.getItem("token");
 
   useEffect(() => {
@@ -316,11 +396,10 @@ export default function Sidebar({ mobile = false, onClose }) {
     setToken("");
     setUser(null);
     localStorage.removeItem("role");
-    if (typeof onClose === "function") onClose();
+    onClose?.();
     navigate("/login", { replace: true });
   }
 
-  // ✅ if guest clicks protected routes: go login
   function guard(to) {
     const needsAuth = [
       "/dashboard",
@@ -334,7 +413,7 @@ export default function Sidebar({ mobile = false, onClose }) {
       "/admin/transactions",
     ];
     if (!authed && needsAuth.some((p) => String(to).startsWith(p))) {
-      if (mobile && typeof onClose === "function") onClose();
+      onClose?.();
       navigate("/login", { replace: true });
       return false;
     }
@@ -343,10 +422,9 @@ export default function Sidebar({ mobile = false, onClose }) {
 
   const navClick = (to) => {
     if (!guard(to)) return;
-    if (mobile && typeof onClose === "function") onClose();
+    onClose?.();
   };
 
-  // Load me only if token exists (prevents useless redirects when not logged)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -364,7 +442,6 @@ export default function Sidebar({ mobile = false, onClose }) {
       } catch {
         if (!alive) return;
         setMe(null);
-        // only logout redirect inside app; sidebar is mostly used in app anyway
         hardLogout();
       } finally {
         if (!alive) return;
@@ -388,7 +465,6 @@ export default function Sidebar({ mobile = false, onClose }) {
         let pending = 0;
         let processing = 0;
         let failed = 0;
-
         for (const o of list) {
           const st = String(o?.status || "").toLowerCase();
           if (st === "pending") pending++;
@@ -447,7 +523,6 @@ export default function Sidebar({ mobile = false, onClose }) {
     if (!live) return;
 
     const ms = isOnAdmin ? 15000 : 22000;
-
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       loadSidebarMetrics({ silent: true });
@@ -504,7 +579,8 @@ export default function Sidebar({ mobile = false, onClose }) {
         onClick={() => setLive((v) => !v)}
         className={cls(
           "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-          "backdrop-blur-xl transition",
+          BLUR,
+          "transition",
           live
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
             : "border-white/10 bg-white/5 text-zinc-100/70 hover:bg-white/10"
@@ -517,7 +593,12 @@ export default function Sidebar({ mobile = false, onClose }) {
   );
 
   const footer = !collapsed ? (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+    <div
+      className={cls(
+        "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]",
+        BLUR
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -536,6 +617,7 @@ export default function Sidebar({ mobile = false, onClose }) {
             "border border-white/10 bg-white/5 hover:bg-white/10 transition"
           )}
           title="Go to Wallet"
+          type="button"
         >
           <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
@@ -545,12 +627,14 @@ export default function Sidebar({ mobile = false, onClose }) {
         <button
           onClick={() => (authed ? navigate("/create-order") : navigate("/login"))}
           className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
+          type="button"
         >
           {authed ? "Create order" : "Sign in"}
         </button>
         <button
           onClick={() => navigate("/services")}
           className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+          type="button"
         >
           Services
         </button>
@@ -570,35 +654,19 @@ export default function Sidebar({ mobile = false, onClose }) {
     </div>
   ) : (
     <div className="mt-3 flex justify-center">
-      <div className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl" />
+      <div className={cls("h-10 w-10 rounded-2xl border border-white/10 bg-white/5", BLUR)} />
     </div>
   );
 
   const content = (
     <>
-      {/* ✅ GUEST CAN SEE SERVICES ALWAYS */}
       <Section title="Browse" icon={Sparkles} collapsed={collapsed}>
         <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={() => navClick("/services")} />
       </Section>
 
-      {/* ✅ Protected section (requires login) */}
       <Section title="User" icon={Shield} collapsed={collapsed}>
-        <Item
-          to={authed ? "/dashboard" : "/login"}
-          icon={LayoutDashboard}
-          label="Dashboard"
-          collapsed={collapsed}
-          onClick={() => navClick("/dashboard")}
-        />
-
-        <Item
-          to={authed ? "/create-order" : "/login"}
-          icon={ShoppingCart}
-          label="Create order"
-          collapsed={collapsed}
-          onClick={() => navClick("/create-order")}
-        />
-
+        <Item to={authed ? "/dashboard" : "/login"} icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/dashboard")} />
+        <Item to={authed ? "/create-order" : "/login"} icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={() => navClick("/create-order")} />
         <Item
           to={authed ? "/orders" : "/login"}
           icon={ListChecks}
@@ -607,16 +675,12 @@ export default function Sidebar({ mobile = false, onClose }) {
           onClick={() => navClick("/orders")}
           right={
             authed && myOrdersCount !== null ? (
-              <Badge
-                title="Your orders"
-                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
-              >
+              <Badge title="Your orders" tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}>
                 {myOrdersCount}
               </Badge>
             ) : null
           }
         />
-
         <Item
           to={authed ? "/wallet" : "/login"}
           icon={Wallet}
@@ -633,61 +697,16 @@ export default function Sidebar({ mobile = false, onClose }) {
         />
       </Section>
 
-      {/* Account card only if authed */}
-      {authed ? (
-        <Section title="Account" icon={Settings} collapsed={collapsed}>
-          <div
-            className={cls(
-              "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
-              collapsed ? "hidden" : ""
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
-                <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
-              </div>
-              <button
-                onClick={hardLogout}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" /> Logout
-              </button>
-            </div>
-          </div>
-        </Section>
-      ) : null}
-
-      {/* Admin only */}
       {authed && isAdmin ? (
         <Section title="Admin" icon={Wrench} collapsed={collapsed}>
           <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/admin/dashboard")} />
           <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={() => navClick("/admin/services")} />
           <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={() => navClick("/admin/users")} />
-
-          <Item
-            to="/admin/orders"
-            icon={ListChecks}
-            label="Orders"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/orders")}
-            right={
-              Number.isFinite(pendingOrders) && pendingOrders > 0 ? (
-                <Badge tone="amber" title="Pending/Processing orders">
-                  {pendingOrders}
-                </Badge>
-              ) : (
-                <Badge title="Pending/Processing orders">0</Badge>
-              )
-            }
-          />
-
+          <Item to="/admin/orders" icon={ListChecks} label="Orders" collapsed={collapsed} onClick={() => navClick("/admin/orders")} />
           <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={() => navClick("/admin/transactions")} />
         </Section>
       ) : null}
 
-      {/* ✅ Support + Legal (available to everyone) */}
       <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
         <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
         <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
@@ -701,41 +720,77 @@ export default function Sidebar({ mobile = false, onClose }) {
     </>
   );
 
-  if (!mobile) {
-    return (
-      <div className="sticky top-0 hidden md:block">
-        <SidebarShell
-          mobile={false}
-          collapsed={collapsed}
-          setCollapsed={setCollapsed}
-          onLogout={hardLogout}
-          loading={loading}
-          title="FollowerBooster"
-          subtitle={emailLabel}
-          statusPills={statusPills}
-          footer={footer}
-        >
-          {content}
-        </SidebarShell>
-      </div>
-    );
-  }
+  return {
+    collapsed,
+    setCollapsed,
+    hardLogout,
+    loading,
+    emailLabel,
+    statusPills,
+    footer,
+    content,
+  };
+}
+
+// ✅ Desktop sidebar (default export)
+export default function Sidebar() {
+  const {
+    collapsed,
+    setCollapsed,
+    hardLogout,
+    loading,
+    emailLabel,
+    statusPills,
+    footer,
+    content,
+  } = useSidebarData();
 
   return (
-    <SidebarShell
-      mobile
-      collapsed={false}
-      setCollapsed={() => {}}
-      onLogout={hardLogout}
-      loading={loading}
-      title="FollowerBooster"
-      subtitle={emailLabel}
-      statusPills={statusPills}
-      footer={footer}
-    >
-      {content}
-    </SidebarShell>
+    <div className="sticky top-0 hidden md:block">
+      <SidebarShell
+        mobile={false}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        onLogout={hardLogout}
+        loading={loading}
+        title="FollowerBooster"
+        subtitle={emailLabel}
+        statusPills={statusPills}
+        footer={footer}
+      >
+        {content}
+      </SidebarShell>
+    </div>
   );
 }
 
+// ✅ Mobile drawer sidebar (named export)
+export function SidebarDrawer({ open, onClose }) {
+  const {
+    hardLogout,
+    loading,
+    emailLabel,
+    statusPills,
+    footer,
+    content,
+  } = useSidebarData(onClose);
 
+  return (
+    <MobileDrawer open={open} onClose={onClose}>
+      <SidebarShell
+        mobile
+        collapsed={false}
+        setCollapsed={() => {}}
+        onLogout={hardLogout}
+        loading={loading}
+        title="FollowerBooster"
+        subtitle={emailLabel}
+        statusPills={statusPills}
+        footer={footer}
+        onClose={onClose}
+      >
+        {content}
+      </SidebarShell>
+    </MobileDrawer>
+  );
+}
