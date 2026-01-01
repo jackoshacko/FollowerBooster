@@ -12,8 +12,17 @@ export function getToken() {
   return localStorage.getItem("token") || "";
 }
 
+function normalizeToken(token) {
+  const t = String(token || "").trim();
+  if (!t) return "";
+  // if token comes as "Bearer xxx", store only raw
+  if (/^bearer\s+/i.test(t)) return t.replace(/^bearer\s+/i, "").trim();
+  return t;
+}
+
 export function setToken(token) {
-  if (token) localStorage.setItem("token", String(token));
+  const t = normalizeToken(token);
+  if (t) localStorage.setItem("token", t);
   else localStorage.removeItem("token");
 }
 
@@ -61,7 +70,6 @@ const PUBLIC_PREFIXES = [
 
 function isPublicPath(pathname) {
   const p = String(pathname || "/");
-  // exact "/" should be allowed
   if (p === "/") return true;
   return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
 }
@@ -70,11 +78,11 @@ function redirectToLogin() {
   if (typeof window === "undefined") return;
 
   const path = window.location.pathname || "/";
-  // ✅ don't hard-redirect when user is already on public pages
   if (isPublicPath(path)) return;
 
   if (path !== "/login") {
-    window.location.href = "/login";
+    const next = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login?next=${next}`;
   }
 }
 
@@ -129,12 +137,36 @@ function apiLooksNgrok() {
   return a.includes("ngrok-free.dev") || a.includes("ngrok.io");
 }
 
-/* ================= CORE REQUEST (TOKEN-ONLY) ================= */
+function buildAuthHeader(token) {
+  const t = String(token || "").trim();
+  if (!t) return null;
+  if (/^bearer\s+/i.test(t)) return t; // already "Bearer ..."
+  return `Bearer ${t}`;
+}
+
+function isSameOriginApi() {
+  // if API is same origin as frontend, credentials include is safe
+  try {
+    const api = new URL(String(API));
+    const cur = new URL(window.location.origin);
+    return api.origin === cur.origin;
+  } catch {
+    return false;
+  }
+}
+
+/* ================= CORE REQUEST (TOKEN-ONLY DEFAULT) ================= */
 export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
 
-  const { headers: extraHeaders, body, ...rest } = options;
+  // allow per-request override
+  const {
+    headers: extraHeaders,
+    body,
+    withCredentials, // <- if true, uses credentials: "include"
+    ...rest
+  } = options;
 
   const hasBody = body !== undefined && body !== null;
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
@@ -144,9 +176,11 @@ export async function request(path, options = {}) {
   const finalBody =
     !hasBody ? undefined : isForm || isBlob || isString ? body : JSON.stringify(body);
 
+  const authHeader = buildAuthHeader(token);
+
   const headers = {
     Accept: "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(authHeader ? { Authorization: authHeader } : {}),
     ...(hasBody && !(isForm || isBlob) && !isString ? { "Content-Type": "application/json" } : {}),
     ...(extraHeaders || {}),
   };
@@ -155,12 +189,18 @@ export async function request(path, options = {}) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
+  // ✅ Default: omit (prevents CORS credentials errors)
+  // ✅ If you really need cookies: pass { withCredentials: true }
+  // ✅ If API is same-origin (rare here), include is safe
+  const credentialsMode =
+    withCredentials === true || isSameOriginApi() ? "include" : "omit";
+
   const res = await fetch(apiUrl(path), {
     ...rest,
     method,
     headers,
     body: method === "GET" || method === "HEAD" ? undefined : finalBody,
-    credentials: "omit",
+    credentials: credentialsMode,
     mode: "cors",
   });
 

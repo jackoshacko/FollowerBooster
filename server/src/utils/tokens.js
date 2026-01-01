@@ -1,26 +1,72 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
-export function signAccessToken(payload) {
-  if (!process.env.JWT_ACCESS_SECRET) {
-    throw new Error("JWT_ACCESS_SECRET missing");
+/* =========================================================
+   Helpers
+========================================================= */
+function mustEnv(name) {
+  const v = process.env[name];
+  if (!v) {
+    throw new Error(`${name} missing`);
   }
+  return v;
+}
 
-  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+function safeStr(x) {
+  return String(x || "").trim();
+}
+
+/* =========================================================
+   ACCESS TOKEN (generic)
+========================================================= */
+export function signAccessToken(payload) {
+  const secret = mustEnv("JWT_ACCESS_SECRET");
+
+  return jwt.sign(payload, secret, {
     expiresIn: process.env.ACCESS_TOKEN_TTL || "15m",
   });
 }
 
+/* =========================================================
+   REFRESH TOKEN
+========================================================= */
 export function signRefreshToken(payload) {
-  if (!process.env.JWT_REFRESH_SECRET) {
-    throw new Error("JWT_REFRESH_SECRET missing");
-  }
+  const secret = mustEnv("JWT_REFRESH_SECRET");
 
-  return jwt.sign(payload, process.env.JWT_REFRESH_SECRET, {
+  return jwt.sign(payload, secret, {
     expiresIn: process.env.REFRESH_TOKEN_TTL || "30d",
   });
 }
 
+/* =========================================================
+   ✅ ACCESS TOKEN FOR USER (BULLETPROOF)
+   - id  = MongoDB _id   (OBAVEZNO)
+   - sub = providerId   (Google / OAuth, optional)
+========================================================= */
+export function signAccessTokenForUser(user, extra = {}) {
+  if (!user || !user._id) {
+    throw new Error("signAccessTokenForUser: user._id missing");
+  }
+
+  const provider = safeStr(extra.provider || user.provider || "local");
+  const providerId = safeStr(
+    extra.providerId ||
+    extra.sub ||                // allow passing { sub }
+    user.providerId ||
+    ""
+  );
+
+  return signAccessToken({
+    id: user._id.toString(),     // ✅ MongoDB ObjectId (24 chars)
+    role: user.role || "user",
+    provider,
+    ...(providerId ? { sub: providerId } : {}), // ✅ OAuth-safe
+  });
+}
+
+/* =========================================================
+   TOKEN HASH (for refresh sessions)
+========================================================= */
 export function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }

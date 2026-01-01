@@ -3,41 +3,59 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { User } from "../models/User.js";
 
-export async function requireAuth(req, res, next) {
+function pickBearer(req) {
   const auth = req.headers.authorization || "";
-  if (!auth.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Missing Bearer token" });
-  }
+  if (!auth) return "";
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  return m ? String(m[1] || "").trim() : "";
+}
 
-  const token = auth.slice(7).trim();
+export async function requireAuth(req, res, next) {
+  const token = pickBearer(req);
+
   if (!token) {
-    return res.status(401).json({ message: "Missing token" });
+    return res.status(401).json({ message: "Missing Bearer token" });
   }
 
   try {
     const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
 
-    // ✅ support both payload.id and payload.sub
-    const id = String(payload?.id || payload?.sub || "").trim();
-    if (!id) {
-      return res.status(401).json({ message: "Invalid token payload" });
+    // ✅ prefer DB id (Mongo ObjectId) from token payload
+    const rawDbId = String(payload?.id || payload?.userId || "").trim();
+
+    // ✅ allow provider subject (google/etc) as fallback
+    const sub = String(payload?.sub || "").trim();
+
+    let user = null;
+
+    // 1) If token contains a valid Mongo id → use it
+    if (rawDbId && mongoose.isValidObjectId(rawDbId)) {
+      user = await User.findById(rawDbId).select(
+        "_id email role balance name avatarUrl provider providerId"
+      );
     }
 
-    // ✅ critical: must be Mongo ObjectId (prevents bson crashes)
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(401).json({ message: "Invalid token user id" });
-    }
+    // 2) If no valid DB id, try resolving via providerId = sub
+    //    (Google 'sub' is NOT a Mongo id; it's provider user id)
+    if (!user && sub) {
+      // optional: if you store provider in token, use it; otherwise just lookup by providerId
+      const provider = String(payload?.provider || payload?.issProvider || "").trim(); // optional
+      const q = provider
+        ? { provider, providerId: sub }
+        : { providerId: sub };
 
-    // ✅ load user from DB (authoritative role/email)
-    const user = await User.findById(id).select(
-      "_id email role balance name avatarUrl provider providerId"
-    );
+      user = await User.findOne(q).select(
+        "_id email role balance name avatarUrl provider providerId"
+      );
+    }
 
     if (!user) {
-      return res.status(401).json({ message: "User not found" });
+      // better message for debugging
+      return res.status(401).json({
+        message: "User not found for token",
+      });
     }
 
-    // ✅ attach safe user object
     req.user = {
       id: user._id.toString(),
       email: user.email,

@@ -8,7 +8,8 @@ import { initPassport } from "./auth/passport.js";
 
 // ================= PUBLIC ROUTES =================
 import healthRoutes from "./routes/health.routes.js";
-import authRoutes from "./routes/auth.routes.js";
+import authRoutes from "./routes/auth.routes.js"; // local login/register etc (NO google callback inside!)
+import authGoogleRoutes from "./routes/auth.google.routes.js"; // ✅ ONLY google routes here
 import servicesRoutes from "./routes/services.routes.js";
 
 // ================= USER ROUTES =================
@@ -75,6 +76,7 @@ export function createApp({ corsOrigins = [] } = {}) {
     req.reqId = reqId;
     res.setHeader("x-request-id", reqId);
 
+    // small hardening
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
@@ -113,7 +115,7 @@ export function createApp({ corsOrigins = [] } = {}) {
       return cb(null, origin); // echo exact origin
     },
 
-    // ✅ TOKEN ONLY (no cookies from browser)
+    // ✅ TOKEN ONLY (no cookies from browser API calls)
     credentials: false,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -137,15 +139,15 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES
+  // COOKIES (needed for oauth_state CSRF cookie)
   // =====================================================
   app.use(cookieParser());
 
   // =====================================================
   // ✅ PASSPORT INIT (MUST BE BEFORE /auth routes)
   // =====================================================
-  initPassport();               // registers GoogleStrategy
-  app.use(passport.initialize()); // enables passport on requests
+  initPassport();
+  app.use(passport.initialize());
 
   // =====================================================
   // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
@@ -169,6 +171,9 @@ export function createApp({ corsOrigins = [] } = {}) {
       time: new Date().toISOString(),
       reqId: req.reqId,
       corsWhitelist: whitelist,
+      routes: {
+        google: "/auth/google  -> /auth/google/callback",
+      },
     });
   });
 
@@ -177,8 +182,14 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   app.use("/health", healthRoutes);
 
-  // public
+  // ✅ IMPORTANT ORDER:
+  // 1) mount Google OAuth routes FIRST (so /auth/google + /auth/google/callback always use this file)
+  app.use("/auth", authGoogleRoutes);
+
+  // 2) then mount normal auth routes (login/register/etc) — MUST NOT contain /google/callback anymore
   app.use("/auth", authRoutes);
+
+  // public
   app.use("/services", servicesRoutes);
 
   // user
