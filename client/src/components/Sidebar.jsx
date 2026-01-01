@@ -52,7 +52,6 @@ function useBodyScrollLock(locked) {
     const y = window.scrollY || 0;
     body.dataset.scrollY = String(y);
 
-    // iOS-friendly: freeze body
     body.style.position = "fixed";
     body.style.top = `-${y}px`;
     body.style.left = "0";
@@ -78,7 +77,7 @@ function useBodyScrollLock(locked) {
 
 /* =========================
    Mobile Drawer (PORTAL)
-   - key fix: render into document.body
+   ✅ SCROLL FIX: panel itself scrolls
 ========================= */
 function MobileDrawer({ open, onClose, children }) {
   useBodyScrollLock(open);
@@ -96,11 +95,7 @@ function MobileDrawer({ open, onClose, children }) {
   if (!open || !mounted) return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-[999999] md:hidden"
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-[999999] md:hidden" role="dialog" aria-modal="true">
       {/* overlay */}
       <button
         type="button"
@@ -109,12 +104,13 @@ function MobileDrawer({ open, onClose, children }) {
         aria-label="Close sidebar"
       />
 
-      {/* slide panel */}
+      {/* ✅ scrollable panel */}
       <div
         className={cls(
           "absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]",
-          "translate-x-0"
+          "overflow-y-auto overscroll-contain"
         )}
+        style={{ WebkitOverflowScrolling: "touch" }}
       >
         {children}
       </div>
@@ -124,7 +120,7 @@ function MobileDrawer({ open, onClose, children }) {
 }
 
 /* =========================
-   UI atoms
+   UI
 ========================= */
 function RenderIcon({ icon, className }) {
   if (!icon) return null;
@@ -236,9 +232,8 @@ function Section({ title, icon, collapsed, children, mobile }) {
 }
 
 /* =========================
-   Sidebar shell
-   - Mobile: SOLID BG, NO BLUR
-   - Desktop: premium blur
+   Shell
+   ✅ scroll fix: inner content also scrolls
 ========================= */
 function SidebarShell({
   children,
@@ -257,10 +252,10 @@ function SidebarShell({
     <aside
       className={cls(
         "relative text-zinc-100",
-        mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : "h-screen",
+        mobile ? "min-h-[100dvh] w-[86vw] max-w-[360px]" : "h-screen",
         mobile
           ? cls(
-              "bg-zinc-950", // ✅ HARD FIX: solid bg (no grey washed overlay)
+              "bg-zinc-950",
               "border-r border-white/12",
               "shadow-[0_25px_90px_rgba(0,0,0,0.75)]"
             )
@@ -281,7 +276,7 @@ function SidebarShell({
         <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
       </div>
 
-      {/* safe-area top */}
+      {/* header */}
       <div className="pt-[calc(env(safe-area-inset-top)+12px)] px-4">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
@@ -291,9 +286,7 @@ function SidebarShell({
                 mobile ? "" : DESKTOP_BLUR
               )}
             >
-              <span className="text-xs font-black tracking-tight text-white">
-                FB
-              </span>
+              <span className="text-xs font-black tracking-tight text-white">FB</span>
             </div>
 
             {!collapsed ? (
@@ -365,15 +358,17 @@ function SidebarShell({
         <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
       </div>
 
+      {/* ✅ inner scroll area */}
       <div className="mt-3 flex flex-col min-h-0 px-4">
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]"
+          style={{ WebkitOverflowScrolling: "touch" }}
+        >
           {children}
         </div>
 
         {footer ? (
-          <div className="mt-3 pb-[calc(env(safe-area-inset-bottom)+14px)]">
-            {footer}
-          </div>
+          <div className="mt-3 pb-[calc(env(safe-area-inset-bottom)+14px)]">{footer}</div>
         ) : null}
       </div>
     </aside>
@@ -381,7 +376,7 @@ function SidebarShell({
 }
 
 /* =========================
-   data + helpers
+   data
 ========================= */
 function fmtMoney(n, cur = "EUR") {
   const v = Number(n || 0);
@@ -406,12 +401,7 @@ function useSidebarData(onClose) {
   const [me, setMe] = useState(null);
   const [myOrdersCount, setMyOrdersCount] = useState(null);
   const [walletSnap, setWalletSnap] = useState({ balance: null, currency: "EUR" });
-  const [opsSnap, setOpsSnap] = useState({
-    active: null,
-    pending: null,
-    processing: null,
-    failed: null,
-  });
+  const [opsSnap, setOpsSnap] = useState({ active: null, pending: null, processing: null, failed: null });
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(true);
   const pollRef = useRef(null);
@@ -480,9 +470,7 @@ function useSidebarData(onClose) {
         setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -515,8 +503,7 @@ function useSidebarData(onClose) {
       if (wallet.status === "fulfilled") {
         const w = wallet.value || {};
         setWalletSnap({
-          balance:
-            typeof w?.balance === "number" ? w.balance : Number(w?.balance ?? 0),
+          balance: typeof w?.balance === "number" ? w.balance : Number(w?.balance ?? 0),
           currency: w?.currency || "EUR",
         });
       } else if (!silent) {
@@ -537,9 +524,7 @@ function useSidebarData(onClose) {
       await loadSidebarMetrics();
       if (!alive) return;
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.role]);
 
@@ -575,9 +560,7 @@ function useSidebarData(onClose) {
         title="Wallet snapshot"
       >
         <Wallet className="h-3.5 w-3.5" />{" "}
-        {walletSnap.balance == null
-          ? "Wallet —"
-          : fmtMoney(walletSnap.balance, walletSnap.currency)}
+        {walletSnap.balance == null ? "Wallet —" : fmtMoney(walletSnap.balance, walletSnap.currency)}
       </Chip>
 
       <Chip
@@ -625,9 +608,7 @@ function useSidebarData(onClose) {
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="font-semibold text-zinc-100 truncate">FollowerBooster</div>
-          <div className="mt-1 text-[11px] text-zinc-200/70 truncate">
-            {me?.email || emailLabel}
-          </div>
+          <div className="mt-1 text-[11px] text-zinc-200/70 truncate">{me?.email || emailLabel}</div>
         </div>
         <button
           onClick={() => (authed ? navigate("/wallet") : navigate("/login"))}
@@ -637,6 +618,7 @@ function useSidebarData(onClose) {
           <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
       </div>
+
       {myOrdersCount != null ? (
         <div className="mt-2 text-[11px] text-zinc-200/60">
           Orders tracked: <span className="text-zinc-100/90 font-semibold">{myOrdersCount}</span>
@@ -647,93 +629,33 @@ function useSidebarData(onClose) {
 
   const content = (
     <>
-      <Section title="Browse" icon={Sparkles} collapsed={collapsed} mobile={false}>
-        <Item
-          to="/services"
-          icon={ListChecks}
-          label="Services"
-          collapsed={collapsed}
-          onClick={() => navClick("/services")}
-        />
+      <Section title="Browse" icon={Sparkles} collapsed={collapsed} mobile>
+        <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={() => navClick("/services")} />
       </Section>
 
-      <Section title="User" icon={Shield} collapsed={collapsed} mobile={false}>
-        <Item
-          to={authed ? "/dashboard" : "/login"}
-          icon={LayoutDashboard}
-          label="Dashboard"
-          collapsed={collapsed}
-          onClick={() => navClick("/dashboard")}
-        />
-        <Item
-          to={authed ? "/create-order" : "/login"}
-          icon={ShoppingCart}
-          label="Create order"
-          collapsed={collapsed}
-          onClick={() => navClick("/create-order")}
-        />
-        <Item
-          to={authed ? "/orders" : "/login"}
-          icon={ListChecks}
-          label="Orders"
-          collapsed={collapsed}
-          onClick={() => navClick("/orders")}
-        />
-        <Item
-          to={authed ? "/wallet" : "/login"}
-          icon={Wallet}
-          label="Wallet"
-          collapsed={collapsed}
-          onClick={() => navClick("/wallet")}
-        />
+      <Section title="User" icon={Shield} collapsed={collapsed} mobile>
+        <Item to={authed ? "/dashboard" : "/login"} icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/dashboard")} />
+        <Item to={authed ? "/create-order" : "/login"} icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={() => navClick("/create-order")} />
+        <Item to={authed ? "/orders" : "/login"} icon={ListChecks} label="Orders" collapsed={collapsed} onClick={() => navClick("/orders")} />
+        <Item to={authed ? "/wallet" : "/login"} icon={Wallet} label="Wallet" collapsed={collapsed} onClick={() => navClick("/wallet")} />
       </Section>
 
       {authed && isAdmin ? (
-        <Section title="Admin" icon={Wrench} collapsed={collapsed} mobile={false}>
-          <Item
-            to="/admin/dashboard"
-            icon={BarChart3}
-            label="Dashboard"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/dashboard")}
-          />
-          <Item
-            to="/admin/services"
-            icon={Wrench}
-            label="Services"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/services")}
-          />
-          <Item
-            to="/admin/users"
-            icon={Users}
-            label="Users"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/users")}
-          />
-          <Item
-            to="/admin/orders"
-            icon={ListChecks}
-            label="Orders"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/orders")}
-          />
-          <Item
-            to="/admin/transactions"
-            icon={Receipt}
-            label="Transactions"
-            collapsed={collapsed}
-            onClick={() => navClick("/admin/transactions")}
-          />
+        <Section title="Admin" icon={Wrench} collapsed={collapsed} mobile>
+          <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/admin/dashboard")} />
+          <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={() => navClick("/admin/services")} />
+          <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={() => navClick("/admin/users")} />
+          <Item to="/admin/orders" icon={ListChecks} label="Orders" collapsed={collapsed} onClick={() => navClick("/admin/orders")} />
+          <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={() => navClick("/admin/transactions")} />
         </Section>
       ) : null}
 
-      <Section title="Support" icon={LifeBuoy} collapsed={collapsed} mobile={false}>
+      <Section title="Support" icon={LifeBuoy} collapsed={collapsed} mobile>
         <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
         <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
       </Section>
 
-      <Section title="Legal" icon={FileText} collapsed={collapsed} mobile={false}>
+      <Section title="Legal" icon={FileText} collapsed={collapsed} mobile>
         <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
         <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
         <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
