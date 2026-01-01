@@ -1,4 +1,3 @@
-// client/src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -24,7 +23,6 @@ import {
   LifeBuoy,
   FileText,
   Mail,
-  X,
 } from "lucide-react";
 
 import { api, setToken, setUser } from "../lib/api.js";
@@ -32,14 +30,6 @@ import { api, setToken, setUser } from "../lib/api.js";
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
 }
-
-// -------- iOS detection + blur policy
-const IS_IOS =
-  typeof navigator !== "undefined" &&
-  /iPad|iPhone|iPod/.test(navigator.userAgent || "") &&
-  typeof window !== "undefined";
-
-const NO_BLUR = IS_IOS; // iOS Safari blur zna da “pojede” tekst / napravi crno
 
 function RenderIcon({ icon, className }) {
   if (!icon) return null;
@@ -65,7 +55,7 @@ function Badge({ children, tone = "zinc", title }) {
       title={title}
       className={cls(
         "ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        NO_BLUR ? "" : "backdrop-blur-xl",
+        "backdrop-blur-xl",
         toneCls
       )}
     >
@@ -89,7 +79,7 @@ function Chip({ children, tone = "neutral", title }) {
       title={title}
       className={cls(
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        NO_BLUR ? "" : "backdrop-blur-xl",
+        "backdrop-blur-xl",
         tones[tone] || tones.neutral
       )}
     >
@@ -144,7 +134,7 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
           <span
             className={cls(
               "grid h-9 w-9 place-items-center rounded-2xl border shrink-0 transition",
-              NO_BLUR ? "" : "backdrop-blur-xl",
+              "backdrop-blur-xl",
               isActive
                 ? "border-white/14 bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_10px_35px_rgba(168,85,247,0.20)]"
                 : "border-white/10 bg-white/5 group-hover:bg-white/10"
@@ -175,13 +165,7 @@ function Section({ title, icon, collapsed, children }) {
     <div className="mt-5">
       {!collapsed ? (
         <div className="mb-2 flex items-center gap-2 px-2">
-          <span
-            className={cls(
-              "inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1",
-              "text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80",
-              NO_BLUR ? "" : "backdrop-blur-xl"
-            )}
-          >
+          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80 backdrop-blur-xl">
             {icon ? <RenderIcon icon={icon} className="h-3.5 w-3.5" /> : null}
             <span>{title}</span>
           </span>
@@ -196,99 +180,6 @@ function Section({ title, icon, collapsed, children }) {
   );
 }
 
-function fmtMoney(n, cur = "EUR") {
-  const v = Number(n || 0);
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: cur,
-      maximumFractionDigits: 2,
-    }).format(v);
-  } catch {
-    return `${Math.round(v * 100) / 100} ${cur}`;
-  }
-}
-
-// ---------- Mobile Drawer (overlay) + body scroll lock
-function useBodyScrollLock(locked) {
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const body = document.body;
-    const html = document.documentElement;
-
-    if (!locked) {
-      body.style.overflow = "";
-      body.style.position = "";
-      body.style.top = "";
-      body.style.left = "";
-      body.style.right = "";
-      body.style.width = "";
-      html.style.overscrollBehavior = "";
-      return;
-    }
-
-    const scrollY = window.scrollY || 0;
-    body.dataset.scrollY = String(scrollY);
-
-    body.style.overflow = "hidden";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    html.style.overscrollBehavior = "none";
-
-    return () => {
-      const y = Number(body.dataset.scrollY || "0");
-      body.style.overflow = "";
-      body.style.position = "";
-      body.style.top = "";
-      body.style.left = "";
-      body.style.right = "";
-      body.style.width = "";
-      html.style.overscrollBehavior = "";
-      window.scrollTo(0, y);
-    };
-  }, [locked]);
-}
-
-function MobileDrawer({ open, onClose, children }) {
-  useBodyScrollLock(open);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[999] md:hidden">
-      {/* overlay */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/70"
-        onClick={onClose}
-        aria-label="Close sidebar"
-      />
-
-      {/* panel */}
-      <div className="absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]">
-        <div className="h-full animate-[sbIn_.16s_ease-out]">
-          <style>{`
-            @keyframes sbIn { from { transform: translateX(-10px); opacity:.98 } to { transform: translateX(0); opacity:1 } }
-          `}</style>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SidebarShell({
   children,
   collapsed,
@@ -299,44 +190,30 @@ function SidebarShell({
   subtitle,
   statusPills,
   footer,
-  isMobile,
-  onClose,
+  mobile,
 }) {
-  const glass = isMobile
-    ? NO_BLUR
-      ? "bg-zinc-950/96"
-      : "bg-zinc-950/90 backdrop-blur-2xl"
-    : NO_BLUR
-    ? "bg-black/55"
-    : "bg-black/35 backdrop-blur-xl";
-
   return (
     <aside
       className={cls(
-        "relative border-r border-white/10 p-4",
-        glass,
+        "relative p-4",
+        mobile ? "h-[100dvh]" : "h-screen",
+        mobile
+          ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
+          : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
         "overflow-x-clip",
-        isMobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : collapsed ? "w-[98px]" : "w-[310px]"
+        collapsed ? "w-[98px]" : "w-[310px]"
       )}
     >
-      {/* background blobs */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
         <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
       </div>
 
-      {/* header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <div
-            className={cls(
-              "grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5",
-              "shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0",
-              NO_BLUR ? "" : "backdrop-blur-xl"
-            )}
-          >
+          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0 backdrop-blur-xl">
             <span className="text-xs font-black tracking-tight text-white">FB</span>
           </div>
 
@@ -353,47 +230,29 @@ function SidebarShell({
         </div>
 
         <div className="flex items-center gap-2">
-          {isMobile ? (
-            <button
-              onClick={onClose}
-              className={cls(
-                "inline-flex items-center justify-center rounded-2xl p-2",
-                "border border-white/10 bg-white/5 text-zinc-100/80",
-                NO_BLUR ? "" : "backdrop-blur-xl",
-                "hover:bg-white/10 hover:text-white transition"
-              )}
-              title="Close"
-              type="button"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          ) : (
+          {!mobile ? (
             <button
               onClick={() => setCollapsed((v) => !v)}
               className={cls(
                 "inline-flex items-center justify-center rounded-2xl p-2",
-                "border border-white/10 bg-white/5 text-zinc-100/80",
-                NO_BLUR ? "" : "backdrop-blur-xl",
+                "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
                 "hover:bg-white/10 hover:text-white transition",
                 "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
               )}
               title={collapsed ? "Expand" : "Collapse"}
-              type="button"
             >
               {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
             </button>
-          )}
+          ) : null}
 
           <button
             onClick={onLogout}
             className={cls(
               "inline-flex items-center justify-center rounded-2xl p-2",
-              "border border-white/10 bg-white/5 text-zinc-100/80",
-              NO_BLUR ? "" : "backdrop-blur-xl",
+              "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
               "hover:bg-white/10 hover:text-white transition"
             )}
             title="Logout"
-            type="button"
           >
             <LogOut className="h-4 w-4" />
           </button>
@@ -401,20 +260,33 @@ function SidebarShell({
       </div>
 
       {!collapsed && statusPills ? <div className="mb-3 flex flex-wrap gap-2">{statusPills}</div> : null}
+
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-      {/* ✅ ONLY sidebar internal scroll (stable everywhere) */}
-      <div className="mt-3 flex min-h-0 flex-col" style={{ height: "calc(100dvh - 140px)" }}>
+      <div className="mt-3 flex flex-col min-h-0">
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
         </div>
-        {footer ? <div className="mt-3 pb-[calc(env(safe-area-inset-bottom)+12px)]">{footer}</div> : null}
+        {footer ? <div className="mt-3">{footer}</div> : null}
       </div>
     </aside>
   );
 }
 
-export default function Sidebar({ mobileOpen = false, onClose }) {
+function fmtMoney(n, cur = "EUR") {
+  const v = Number(n || 0);
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: cur,
+      maximumFractionDigits: 2,
+    }).format(v);
+  } catch {
+    return `${Math.round(v * 100) / 100} ${cur}`;
+  }
+}
+
+export default function Sidebar({ mobile = false, onClose }) {
   const navigate = useNavigate();
   const loc = useLocation();
 
@@ -433,6 +305,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
 
   const isAdmin = me?.role === "admin";
   const isOnAdmin = loc.pathname.startsWith("/admin");
+
   const authed = !!localStorage.getItem("token");
 
   useEffect(() => {
@@ -443,14 +316,25 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     setToken("");
     setUser(null);
     localStorage.removeItem("role");
-    onClose?.();
+    if (typeof onClose === "function") onClose();
     navigate("/login", { replace: true });
   }
 
+  // ✅ if guest clicks protected routes: go login
   function guard(to) {
-    const needsAuth = ["/dashboard", "/create-order", "/orders", "/wallet", "/admin"];
+    const needsAuth = [
+      "/dashboard",
+      "/create-order",
+      "/orders",
+      "/wallet",
+      "/admin/dashboard",
+      "/admin/services",
+      "/admin/users",
+      "/admin/orders",
+      "/admin/transactions",
+    ];
     if (!authed && needsAuth.some((p) => String(to).startsWith(p))) {
-      onClose?.();
+      if (mobile && typeof onClose === "function") onClose();
       navigate("/login", { replace: true });
       return false;
     }
@@ -459,9 +343,10 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
 
   const navClick = (to) => {
     if (!guard(to)) return;
-    onClose?.();
+    if (mobile && typeof onClose === "function") onClose();
   };
 
+  // Load me only if token exists (prevents useless redirects when not logged)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -479,6 +364,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
       } catch {
         if (!alive) return;
         setMe(null);
+        // only logout redirect inside app; sidebar is mostly used in app anyway
         hardLogout();
       } finally {
         if (!alive) return;
@@ -561,8 +447,8 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     if (!live) return;
 
     const ms = isOnAdmin ? 15000 : 22000;
-    if (pollRef.current) clearInterval(pollRef.current);
 
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(() => {
       loadSidebarMetrics({ silent: true });
       loadAdminStats({ silent: true });
@@ -575,7 +461,8 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
   }, [me, live, isOnAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const emailLabel = useMemo(() => {
-    return me?.email || me?.username || me?.name || (authed ? "Authenticated" : "Guest");
+    const email = me?.email || me?.username || me?.name;
+    return email || (authed ? "Authenticated" : "Guest");
   }, [me, authed]);
 
   const roleLabel = useMemo(() => {
@@ -616,8 +503,8 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
         type="button"
         onClick={() => setLive((v) => !v)}
         className={cls(
-          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold transition",
-          NO_BLUR ? "" : "backdrop-blur-xl",
+          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+          "backdrop-blur-xl transition",
           live
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
             : "border-white/10 bg-white/5 text-zinc-100/70 hover:bg-white/10"
@@ -629,14 +516,8 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     </>
   );
 
-  const footer = (
-    <div
-      className={cls(
-        "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70",
-        "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]",
-        NO_BLUR ? "" : "backdrop-blur-xl"
-      )}
-    >
+  const footer = !collapsed ? (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -649,16 +530,12 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
         </div>
 
         <button
-          onClick={() => {
-            onClose?.();
-            navigate(authed ? "/wallet" : "/login");
-          }}
+          onClick={() => (authed ? navigate("/wallet") : navigate("/login"))}
           className={cls(
             "inline-flex items-center gap-1 rounded-2xl px-3 py-2 text-[11px] font-semibold",
             "border border-white/10 bg-white/5 hover:bg-white/10 transition"
           )}
           title="Go to Wallet"
-          type="button"
         >
           <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
@@ -666,28 +543,20 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
-          onClick={() => {
-            onClose?.();
-            navigate(authed ? "/create-order" : "/login");
-          }}
+          onClick={() => (authed ? navigate("/create-order") : navigate("/login"))}
           className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
-          type="button"
         >
           {authed ? "Create order" : "Sign in"}
         </button>
         <button
-          onClick={() => {
-            onClose?.();
-            navigate("/services");
-          }}
+          onClick={() => navigate("/services")}
           className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
-          type="button"
         >
           Services
         </button>
       </div>
 
-      {authed && isAdmin ? (
+      {isAdmin ? (
         <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
           <div className="flex items-center justify-between">
             <div className="text-[11px] text-zinc-200/70">Admin (30d)</div>
@@ -699,17 +568,36 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
         </div>
       ) : null}
     </div>
+  ) : (
+    <div className="mt-3 flex justify-center">
+      <div className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl" />
+    </div>
   );
 
   const content = (
     <>
+      {/* ✅ GUEST CAN SEE SERVICES ALWAYS */}
       <Section title="Browse" icon={Sparkles} collapsed={collapsed}>
         <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={() => navClick("/services")} />
       </Section>
 
+      {/* ✅ Protected section (requires login) */}
       <Section title="User" icon={Shield} collapsed={collapsed}>
-        <Item to={authed ? "/dashboard" : "/login"} icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/dashboard")} />
-        <Item to={authed ? "/create-order" : "/login"} icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={() => navClick("/create-order")} />
+        <Item
+          to={authed ? "/dashboard" : "/login"}
+          icon={LayoutDashboard}
+          label="Dashboard"
+          collapsed={collapsed}
+          onClick={() => navClick("/dashboard")}
+        />
+
+        <Item
+          to={authed ? "/create-order" : "/login"}
+          icon={ShoppingCart}
+          label="Create order"
+          collapsed={collapsed}
+          onClick={() => navClick("/create-order")}
+        />
 
         <Item
           to={authed ? "/orders" : "/login"}
@@ -719,7 +607,10 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
           onClick={() => navClick("/orders")}
           right={
             authed && myOrdersCount !== null ? (
-              <Badge title="Your orders" tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}>
+              <Badge
+                title="Your orders"
+                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
+              >
                 {myOrdersCount}
               </Badge>
             ) : null
@@ -742,12 +633,12 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
         />
       </Section>
 
+      {/* Account card only if authed */}
       {authed ? (
         <Section title="Account" icon={Settings} collapsed={collapsed}>
           <div
             className={cls(
-              "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75",
-              NO_BLUR ? "" : "backdrop-blur-xl",
+              "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
               collapsed ? "hidden" : ""
             )}
           >
@@ -760,7 +651,6 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
                 onClick={hardLogout}
                 className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
                 title="Logout"
-                type="button"
               >
                 <LogOut className="h-4 w-4" /> Logout
               </button>
@@ -769,22 +659,13 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
         </Section>
       ) : null}
 
-      <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
-        <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
-        <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
-      </Section>
-
-      <Section title="Legal" icon={FileText} collapsed={collapsed}>
-        <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
-        <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
-        <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
-      </Section>
-
+      {/* Admin only */}
       {authed && isAdmin ? (
         <Section title="Admin" icon={Wrench} collapsed={collapsed}>
           <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/admin/dashboard")} />
           <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={() => navClick("/admin/services")} />
           <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={() => navClick("/admin/users")} />
+
           <Item
             to="/admin/orders"
             icon={ListChecks}
@@ -801,57 +682,60 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
               )
             }
           />
+
           <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={() => navClick("/admin/transactions")} />
         </Section>
       ) : null}
+
+      {/* ✅ Support + Legal (available to everyone) */}
+      <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
+        <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
+        <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
+      </Section>
+
+      <Section title="Legal" icon={FileText} collapsed={collapsed}>
+        <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
+        <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
+        <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
+      </Section>
     </>
   );
 
-  // Desktop: just the sidebar itself (layout controls where it sits)
-  const desktop = (
+  if (!mobile) {
+    return (
+      <div className="sticky top-0 hidden md:block">
+        <SidebarShell
+          mobile={false}
+          collapsed={collapsed}
+          setCollapsed={setCollapsed}
+          onLogout={hardLogout}
+          loading={loading}
+          title="FollowerBooster"
+          subtitle={emailLabel}
+          statusPills={statusPills}
+          footer={footer}
+        >
+          {content}
+        </SidebarShell>
+      </div>
+    );
+  }
+
+  return (
     <SidebarShell
-      isMobile={false}
-      collapsed={collapsed}
-      setCollapsed={setCollapsed}
+      mobile
+      collapsed={false}
+      setCollapsed={() => {}}
       onLogout={hardLogout}
       loading={loading}
       title="FollowerBooster"
       subtitle={emailLabel}
       statusPills={statusPills}
       footer={footer}
-      onClose={onClose}
     >
       {content}
     </SidebarShell>
   );
-
-  // Mobile: drawer overlay
-  const mobile = (
-    <MobileDrawer open={mobileOpen} onClose={onClose}>
-      <SidebarShell
-        isMobile
-        collapsed={false}
-        setCollapsed={() => {}}
-        onLogout={hardLogout}
-        loading={loading}
-        title="FollowerBooster"
-        subtitle={emailLabel}
-        statusPills={statusPills}
-        footer={footer}
-        onClose={onClose}
-      >
-        {content}
-      </SidebarShell>
-    </MobileDrawer>
-  );
-
-  return (
-    <>
-      {/* Desktop sidebar visible in md+ (layout will place it) */}
-      <div className="hidden md:block">{desktop}</div>
-
-      {/* Mobile drawer */}
-      {mobile}
-    </>
-  );
 }
+
+
