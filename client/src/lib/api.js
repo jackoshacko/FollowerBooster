@@ -9,7 +9,9 @@ export function apiUrl(path = "") {
 
 /* ================= TOKEN + USER HELPERS ================= */
 export function getToken() {
-  return localStorage.getItem("token") || "";
+  const t = localStorage.getItem("token") || "";
+  if (!t || t === "null" || t === "undefined") return "";
+  return t;
 }
 
 function normalizeToken(token) {
@@ -54,9 +56,11 @@ export function clearAuthLocal() {
   localStorage.removeItem("role");
 }
 
-/* ================= PUBLIC PATH GUARD ================= */
+/* ================= ROUTE GUARDS ================= */
+// ✅ PUBLIC rute (ovde ti je falio /services)
 const PUBLIC_PREFIXES = [
   "/", // home
+  "/services", // ✅ public catalog
   "/login",
   "/register",
   "/no-access",
@@ -74,11 +78,26 @@ function isPublicPath(pathname) {
   return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
 }
 
+// ✅ PROTECTED rute (samo ovde sme auto-redirect na login)
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/create-order",
+  "/orders",
+  "/wallet",
+  "/admin",
+];
+
+function isProtectedPath(pathname) {
+  const p = String(pathname || "/");
+  return PROTECTED_PREFIXES.some((x) => p.startsWith(x));
+}
+
 function redirectToLogin() {
   if (typeof window === "undefined") return;
 
   const path = window.location.pathname || "/";
-  if (isPublicPath(path)) return;
+  // samo ako smo na protected ruti
+  if (!isProtectedPath(path)) return;
 
   if (path !== "/login") {
     const next = encodeURIComponent(window.location.pathname + window.location.search);
@@ -106,10 +125,7 @@ async function readResponse(res) {
       }
     } else {
       const t = text.trim();
-      if (
-        (t.startsWith("{") && t.endsWith("}")) ||
-        (t.startsWith("[") && t.endsWith("]"))
-      ) {
+      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
         try {
           json = JSON.parse(t);
         } catch {
@@ -145,7 +161,6 @@ function buildAuthHeader(token) {
 }
 
 function isSameOriginApi() {
-  // if API is same origin as frontend, credentials include is safe
   try {
     const api = new URL(String(API));
     const cur = new URL(window.location.origin);
@@ -155,18 +170,12 @@ function isSameOriginApi() {
   }
 }
 
-/* ================= CORE REQUEST (TOKEN-ONLY DEFAULT) ================= */
+/* ================= CORE REQUEST ================= */
 export async function request(path, options = {}) {
   const token = getToken();
   const method = String(options.method || "GET").toUpperCase();
 
-  // allow per-request override
-  const {
-    headers: extraHeaders,
-    body,
-    withCredentials, // <- if true, uses credentials: "include"
-    ...rest
-  } = options;
+  const { headers: extraHeaders, body, withCredentials, ...rest } = options;
 
   const hasBody = body !== undefined && body !== null;
   const isForm = typeof FormData !== "undefined" && body instanceof FormData;
@@ -189,9 +198,6 @@ export async function request(path, options = {}) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
-  // ✅ Default: omit (prevents CORS credentials errors)
-  // ✅ If you really need cookies: pass { withCredentials: true }
-  // ✅ If API is same-origin (rare here), include is safe
   const credentialsMode =
     withCredentials === true || isSameOriginApi() ? "include" : "omit";
 
@@ -207,15 +213,27 @@ export async function request(path, options = {}) {
   const { json, text, contentType } = await readResponse(res);
 
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
-    throw new Error(
+    const err = new Error(
       `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(path)}`
     );
+    err.status = res.status;
+    err.data = { text };
+    throw err;
   }
 
+  // ✅ FIX: 401 više NE briše token svuda
   if (res.status === 401) {
-    clearAuthLocal();
-    redirectToLogin();
-    throw new Error(pickErrorMessage(json, "Unauthorized"));
+    const err = new Error(pickErrorMessage(json, "Unauthorized"));
+    err.status = 401;
+    err.data = json ?? { text };
+
+    // samo ako smo na protected ruti -> tek tad smemo da očistimo + redirect
+    if (typeof window !== "undefined" && isProtectedPath(window.location.pathname || "/")) {
+      clearAuthLocal();
+      redirectToLogin();
+    }
+
+    throw err;
   }
 
   if (!res.ok) {
@@ -223,7 +241,10 @@ export async function request(path, options = {}) {
       contentType.includes("text") || contentType.includes("html")
         ? (text || "").slice(0, 300)
         : "";
-    throw new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
+    const err = new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
+    err.status = res.status;
+    err.data = json ?? { text };
+    throw err;
   }
 
   if (json !== null) return json;
