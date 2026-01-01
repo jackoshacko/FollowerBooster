@@ -1,9 +1,9 @@
 // client/src/components/Topbar.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, setToken, setUser } from "../lib/api.js";
-import { Menu, X, LogOut, Search, Plus, Wallet, Shield } from "lucide-react";
-import Sidebar from "./Sidebar.jsx";
+import { Menu, LogOut, Search, Plus, Wallet, Shield } from "lucide-react";
+import { SidebarDrawer } from "./Sidebar.jsx";
 
 function cn(...a) {
   return a.filter(Boolean).join(" ");
@@ -49,15 +49,13 @@ export default function Topbar() {
   const loc = useLocation();
   const label = routeLabel(loc.pathname);
 
-  const [open, setOpen] = useState(false);
+  const [sbOpen, setSbOpen] = useState(false);
 
   const [me, setMe] = useState(null);
   const isAdmin = String(me?.role || "").toLowerCase() === "admin";
 
   const [q, setQ] = useState("");
   const [focusSearch, setFocusSearch] = useState(false);
-
-  const drawerRef = useRef(null);
 
   function hardLogout({ redirect = true } = {}) {
     setToken("");
@@ -73,46 +71,10 @@ export default function Topbar() {
     hardLogout({ redirect: true });
   }
 
+  // close drawer on route change
   useEffect(() => {
-    setOpen(false);
+    setSbOpen(false);
   }, [loc.pathname]);
-
-  // ✅ PERFECT iOS lock (keeps scroll position)
-  useEffect(() => {
-    const body = document.body;
-    const html = document.documentElement;
-
-    if (!open) {
-      // restore scroll
-      const y = Number(body.dataset?.scrollY || "0");
-      body.style.position = "";
-      body.style.top = "";
-      body.style.left = "";
-      body.style.right = "";
-      body.style.width = "";
-      body.style.overflow = "";
-      html.style.overscrollBehavior = "";
-      if (y) window.scrollTo(0, y);
-      if (body.dataset) body.dataset.scrollY = "";
-      return;
-    }
-
-    const scrollY = window.scrollY || window.pageYOffset || 0;
-    if (body.dataset) body.dataset.scrollY = String(scrollY);
-
-    // lock page behind drawer
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-    html.style.overscrollBehavior = "none";
-
-    return () => {
-      // restore happens in the !open branch on next render
-    };
-  }, [open]);
 
   // load me
   useEffect(() => {
@@ -164,7 +126,7 @@ export default function Topbar() {
 
   useEffect(() => {
     function onKey(e) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") setSbOpen(false);
       const isK = e.key?.toLowerCase?.() === "k";
       const meta = e.metaKey || e.ctrlKey;
       if (meta && isK) {
@@ -183,7 +145,10 @@ export default function Topbar() {
     setFocusSearch(false);
   }, [focusSearch]);
 
-  const userLabel = useMemo(() => me?.email || me?.username || me?.name || "User", [me]);
+  const userLabel = useMemo(
+    () => me?.email || me?.username || me?.name || "User",
+    [me]
+  );
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
   function onSubmitSearch(e) {
@@ -201,28 +166,30 @@ export default function Topbar() {
 
   return (
     <>
-      <header className="relative z-30 w-full overflow-x-clip">
+      <header className="sticky top-0 z-40 w-full overflow-x-clip">
         <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
 
           <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="glow-orb absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
-            <div className="glow-orb2 absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
+            <div className="absolute -left-24 -top-24 h-64 w-64 rounded-full bg-purple-500/14 blur-3xl" />
+            <div className="absolute right-[-120px] top-[-40px] h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
             <div className="absolute inset-0 bg-[radial-gradient(900px_120px_at_20%_0%,rgba(255,255,255,0.10),transparent_65%)]" />
           </div>
 
           <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
             <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
               <div className="flex items-center gap-3 min-w-0">
+                {/* ✅ mobile menu opens SidebarDrawer (PORTAL) */}
                 <button
-                  onClick={() => setOpen(true)}
+                  onClick={() => setSbOpen(true)}
                   className={cn(
                     "md:hidden inline-flex items-center justify-center rounded-2xl p-2",
-                    "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
+                    "border border-white/10 bg-white/5 text-zinc-100/90 backdrop-blur-xl",
                     "hover:bg-white/10 transition active:scale-[0.98]"
                   )}
                   title="Menu"
+                  type="button"
                 >
                   <Menu className="h-5 w-5" />
                 </button>
@@ -231,9 +198,12 @@ export default function Topbar() {
                   onClick={() => nav("/dashboard")}
                   className="flex items-center gap-3 min-w-0"
                   title="Go to Dashboard"
+                  type="button"
                 >
                   <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
-                    <span className="text-xs font-black tracking-tight text-white">FB</span>
+                    <span className="text-xs font-black tracking-tight text-white">
+                      FB
+                    </span>
                   </div>
 
                   <div className="leading-tight min-w-0">
@@ -309,6 +279,7 @@ export default function Topbar() {
                       "active:scale-[0.99] transition"
                     )}
                     title="Wallet"
+                    type="button"
                   >
                     <Wallet className="h-4 w-4" />
                     Wallet
@@ -323,6 +294,7 @@ export default function Topbar() {
                       "active:scale-[0.99] transition"
                     )}
                     title="Create order"
+                    type="button"
                   >
                     <Plus className="h-4 w-4" />
                     Create
@@ -342,7 +314,9 @@ export default function Topbar() {
                   </div>
 
                   <div className="hidden md:block leading-tight max-w-[180px]">
-                    <div className="text-xs font-semibold text-zinc-100 truncate">{userLabel}</div>
+                    <div className="text-xs font-semibold text-zinc-100 truncate">
+                      {userLabel}
+                    </div>
                     <div className="mt-0.5">
                       <RolePill role={me?.role} />
                     </div>
@@ -358,6 +332,7 @@ export default function Topbar() {
                     "active:scale-[0.99] transition"
                   )}
                   title="Logout"
+                  type="button"
                 >
                   <LogOut className="h-4 w-4" />
                   <span className="hidden sm:inline">Logout</span>
@@ -365,6 +340,7 @@ export default function Topbar() {
               </div>
             </div>
 
+            {/* mobile under-bar */}
             <div className="lg:hidden pb-3">
               <div
                 className={cn(
@@ -380,6 +356,7 @@ export default function Topbar() {
                     "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
                     "active:scale-[0.99] transition"
                   )}
+                  type="button"
                 >
                   <Wallet className="h-4 w-4" />
                   Wallet
@@ -392,6 +369,7 @@ export default function Topbar() {
                     "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
                     "active:scale-[0.99] transition"
                   )}
+                  type="button"
                 >
                   <Plus className="h-4 w-4" />
                   Create
@@ -416,47 +394,8 @@ export default function Topbar() {
         </div>
       </header>
 
-      {open ? (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/85"
-            onClick={() => setOpen(false)}
-          />
-
-          {/* Drawer: scroll INSIDE (webkit scroll) */}
-          <div
-            ref={drawerRef}
-            className={cn(
-              "absolute left-0 top-0 h-[100dvh] w-[88%] max-w-[380px]",
-              "overflow-y-auto overflow-x-hidden",
-              "overscroll-contain",
-              "[scrollbar-width:thin]"
-            )}
-            style={{
-              paddingTop: "env(safe-area-inset-top)",
-              paddingBottom: "env(safe-area-inset-bottom)",
-              WebkitOverflowScrolling: "touch",
-            }}
-          >
-            <div className="sticky top-0 z-50 flex justify-end px-3 pt-3">
-              <button
-                onClick={() => setOpen(false)}
-                className={cn(
-                  "inline-flex items-center justify-center rounded-2xl p-2",
-                  "border border-white/10 bg-white/5 text-zinc-100/85 backdrop-blur-xl",
-                  "hover:bg-white/10 transition active:scale-[0.98]"
-                )}
-                title="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <Sidebar mobile onClose={() => setOpen(false)} />
-          </div>
-        </div>
-      ) : null}
+      {/* ✅ THE ONLY mobile sidebar now (Portal) */}
+      <SidebarDrawer open={sbOpen} onClose={() => setSbOpen(false)} />
     </>
   );
 }
-
