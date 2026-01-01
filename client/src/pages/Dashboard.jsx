@@ -1,5 +1,6 @@
 // client/src/pages/Dashboard.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, Children } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api.js";
 import {
   RefreshCcw,
@@ -150,8 +151,6 @@ const IS_IOS =
   /iPad|iPhone|iPod/.test(navigator.userAgent) &&
   !window.MSStream;
 
-// iOS Safari/WebView: backdrop-filter + big glass layers can cause “tap to scroll” + missing paint.
-// Keep cards premium, but remove heavy blur from interactive containers on iOS.
 const DISABLE_BLUR_ON_IOS = IS_IOS;
 
 /* ================= UI building blocks ================= */
@@ -166,7 +165,6 @@ function Card({ title, right, icon: Icon, children, className }) {
       className={cn(
         "relative overflow-hidden rounded-2xl border border-white/10",
         "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_10px_30px_rgba(0,0,0,0.45)]",
-        "will-change-auto",
         className
       )}
     >
@@ -230,35 +228,6 @@ function Divider() {
   return <div className="my-3 h-px w-full bg-white/10" />;
 }
 
-function KpiValue({ loading, value, sub, trend }) {
-  if (loading) {
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-7 w-36" />
-        <Skeleton className="h-3 w-28" />
-      </div>
-    );
-  }
-
-  const trendTone = trend == null ? "neutral" : trend > 0 ? "ok" : trend < 0 ? "bad" : "neutral";
-
-  return (
-    <div>
-      <div className="flex items-end justify-between gap-3">
-        <div className="text-3xl font-black tracking-tight">{value}</div>
-        {trend != null ? (
-          <Chip tone={trendTone}>
-            {trend > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : null}
-            {trend < 0 ? <ArrowDownRight className="h-3.5 w-3.5" /> : null}
-            {Math.abs(trend).toFixed(1)}%
-          </Chip>
-        ) : null}
-      </div>
-      {sub ? <div className="mt-1 text-xs text-zinc-100/60">{sub}</div> : null}
-    </div>
-  );
-}
-
 function MiniBars({ data, height = 52 }) {
   const max = Math.max(1, ...data.map((x) => safeNum(x, 0)));
   return (
@@ -298,7 +267,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
           <button
             type="button"
             onClick={onCopy}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98]"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-white/20"
             title="Copy"
           >
             <Copy className="h-4 w-4" />
@@ -309,7 +278,7 @@ function RowItem({ left, right, onCopy, onOpen }) {
           <button
             type="button"
             onClick={onOpen}
-            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98]"
+            className="rounded-xl border border-white/10 bg-white/5 p-2 text-zinc-100/80 hover:bg-white/10 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-white/20"
             title="Open"
           >
             <ExternalLink className="h-4 w-4" />
@@ -329,7 +298,7 @@ function Masonry({ children }) {
     <>
       <div className="grid gap-4 md:hidden">{children}</div>
       <div className="hidden md:block masonry gap-4">
-        {React.Children.map(children, (child, idx) => (
+        {Children.map(children, (child, idx) => (
           <div key={idx} className="mb-4 break-inside-avoid">
             {child}
           </div>
@@ -451,7 +420,7 @@ export default function Dashboard() {
   }
 
   async function load({ silent = false } = {}) {
-    if (inFlight.current) return; // ✅ prevents race conditions on iOS/webviews
+    if (inFlight.current) return;
     inFlight.current = true;
 
     setS((p) => ({ ...p, loading: !silent, error: "" }));
@@ -613,38 +582,6 @@ export default function Dashboard() {
     return { tone, msg, riskScore: Math.round(riskScore * 10) / 10 };
   }, [s.failedOrders, s.pendingOrders, s.processingOrders]);
 
-  const statusBadges = useMemo(() => {
-    const pending = safeNum(s.pendingOrders, 0);
-    const processing = safeNum(s.processingOrders, 0);
-    const completed = safeNum(s.completedOrders, 0);
-    const failed = safeNum(s.failedOrders, 0);
-
-    const any = pending || processing || completed || failed;
-
-    if (!any) {
-      return [
-        <Chip key="a" tone="info">
-          <Activity className="h-3.5 w-3.5" /> Active: {fmtInt(s.activeOrders)}
-        </Chip>,
-      ];
-    }
-
-    return [
-      <Chip key="p" tone="warn">
-        <Clock className="h-3.5 w-3.5" /> Pending: {fmtInt(pending)}
-      </Chip>,
-      <Chip key="pr" tone="info">
-        <Activity className="h-3.5 w-3.5" /> Processing: {fmtInt(processing)}
-      </Chip>,
-      <Chip key="c" tone="ok">
-        <CheckCircle2 className="h-3.5 w-3.5" /> Completed: {fmtInt(completed)}
-      </Chip>,
-      <Chip key="f" tone={failed ? "bad" : "neutral"}>
-        <AlertCircle className="h-3.5 w-3.5" /> Failed: {fmtInt(failed)}
-      </Chip>,
-    ];
-  }, [s.activeOrders, s.pendingOrders, s.processingOrders, s.completedOrders, s.failedOrders]);
-
   const realtimeLabel = useMemo(() => {
     if (!s.lastUpdatedAt) return "—";
     return `Updated ${relTime(s.lastUpdatedAt)}`;
@@ -690,16 +627,12 @@ export default function Dashboard() {
 
   return (
     <div className="w-full overflow-x-hidden pb-[max(env(safe-area-inset-bottom),16px)]">
-      {/* ✅ IMPORTANT: NO html/body styles here (that caused iOS weirdness).
-          All global CSS goes in index.css. */}
       <style>{`
-        /* Desktop masonry only (safe here; doesn't touch html/body) */
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
 
-        /* iOS: prevent input zoom */
         @media (max-width: 767px){
           .mobile-nozoom input,
           .mobile-nozoom select,
@@ -707,6 +640,11 @@ export default function Dashboard() {
             font-size: 16px !important;
             line-height: 1.25rem !important;
           }
+        }
+
+        @media (prefers-reduced-motion: reduce){
+          .animate-spin, .animate-pulse { animation: none !important; }
+          * { scroll-behavior: auto !important; }
         }
       `}</style>
 
@@ -716,11 +654,9 @@ export default function Dashboard() {
         </div>
       ) : null}
 
-      {/* ✅ Single scroll only: page scroll. No nested "overflow-y-auto" wrappers. */}
       <div className="mx-auto w-full max-w-[1200px] space-y-5 px-4 sm:px-5">
         {/* ===== Header ===== */}
         <div className="mobile-nozoom flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          {/* Left (title/meta) */}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-3xl font-black tracking-tight md:text-4xl">Dashboard</div>
@@ -759,12 +695,27 @@ export default function Dashboard() {
               <Chip tone="neutral">{realtimeLabel}</Chip>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">{statusBadges}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Chip tone="info">
+                <Activity className="h-3.5 w-3.5" /> Active: {fmtInt(s.activeOrders)}
+              </Chip>
+              <Chip tone="warn">
+                <Clock className="h-3.5 w-3.5" /> Pending: {fmtInt(s.pendingOrders)}
+              </Chip>
+              <Chip tone="info">
+                <Activity className="h-3.5 w-3.5" /> Processing: {fmtInt(s.processingOrders)}
+              </Chip>
+              <Chip tone="ok">
+                <CheckCircle2 className="h-3.5 w-3.5" /> Completed: {fmtInt(s.completedOrders)}
+              </Chip>
+              <Chip tone={s.failedOrders ? "bad" : "neutral"}>
+                <AlertCircle className="h-3.5 w-3.5" /> Failed: {fmtInt(s.failedOrders)}
+              </Chip>
+            </div>
           </div>
 
-          {/* Right (controls) */}
+          {/* Right controls */}
           <div className="flex w-full flex-col gap-2 lg:w-[540px]">
-            {/* Actions row */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button
                 onClick={() => {
@@ -773,42 +724,43 @@ export default function Dashboard() {
                 }}
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100",
-                  "hover:bg-white/10 active:scale-[0.99]"
+                  "hover:bg-white/10 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
                 )}
+                type="button"
               >
                 <RefreshCcw className="h-4 w-4" /> Refresh
               </button>
 
-              <a
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
-                href="/wallet"
+              <Link
+                to="/wallet"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
               >
                 <CreditCard className="h-4 w-4" /> Top up
-              </a>
+              </Link>
 
-              <a
+              <Link
+                to="/create-order"
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-2xl bg-white/15 px-3 py-2 text-sm font-semibold text-white",
-                  "hover:bg-white/20 active:scale-[0.99]"
+                  "hover:bg-white/20 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
                 )}
-                href="/create-order"
               >
                 <Plus className="h-4 w-4" /> Create
-              </a>
+              </Link>
 
-              <a
-                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99]"
-                href="/services"
+              <Link
+                to="/services"
+                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
               >
                 <Layers className="h-4 w-4" /> Services
-              </a>
+              </Link>
             </div>
 
-            {/* Tools row */}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button
                 onClick={() => setAutoRefresh((x) => !x)}
-                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/90 hover:bg-white/10 active:scale-[0.99]"
+                className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/90 hover:bg-white/10 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
+                type="button"
               >
                 {autoRefresh ? "Pause live" : "Resume live"}
               </button>
@@ -832,16 +784,16 @@ export default function Dashboard() {
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-2xl border border-white/10 px-3 py-2 text-xs font-semibold",
                   onlyProblems ? "bg-red-500/15 text-red-100" : "bg-white/5 text-zinc-100/80",
-                  "hover:bg-white/10 active:scale-[0.99]"
+                  "hover:bg-white/10 active:scale-[0.99] focus:outline-none focus:ring-2 focus:ring-white/20"
                 )}
                 title="Show only pending/failed"
+                type="button"
               >
                 <SlidersHorizontal className="h-4 w-4" />
                 Problems
               </button>
             </div>
 
-            {/* Search row */}
             <div className="flex w-full items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-100/80 sm:text-sm">
               <Search className="h-4 w-4 shrink-0 opacity-80" />
               <input
@@ -881,9 +833,7 @@ export default function Dashboard() {
           <Card title="Wallet intelligence" right={loading ? "" : "Realtime"} icon={Wallet} className="min-h-[210px]">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-end justify-between gap-3">
-                <div className="text-4xl font-black tracking-tight">
-                  {loading ? "—" : fmtMoney(s.balance, currency)}
-                </div>
+                <div className="text-4xl font-black tracking-tight">{loading ? "—" : fmtMoney(s.balance, currency)}</div>
                 <div className="flex flex-wrap gap-2">
                   <Chip tone="info">
                     <Boxes className="h-3.5 w-3.5" /> Orders snapshot: {fmtInt(totalOrdersSnapshot)}
@@ -925,18 +875,18 @@ export default function Dashboard() {
                     text="Top up your wallet to place orders instantly."
                     actions={
                       <>
-                        <a
-                          href="/wallet"
+                        <Link
+                          to="/wallet"
                           className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
                         >
                           <CreditCard className="h-4 w-4" /> Go to Wallet
-                        </a>
-                        <a
-                          href="/services"
+                        </Link>
+                        <Link
+                          to="/services"
                           className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 active:scale-[0.99]"
                         >
                           <Layers className="h-4 w-4" /> Browse Services
-                        </a>
+                        </Link>
                       </>
                     }
                   />
@@ -946,12 +896,22 @@ export default function Dashboard() {
           </Card>
 
           <Card title="Orders live" right={loading ? "" : "Now"} icon={Activity}>
-            <KpiValue
-              loading={loading}
-              value={loading ? "" : fmtInt(s.activeOrders)}
-              sub="Pending / processing orders right now."
-            />
+            <div>
+              {loading ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-7 w-20" />
+                  <Skeleton className="h-3 w-40" />
+                </div>
+              ) : (
+                <>
+                  <div className="text-3xl font-black tracking-tight">{fmtInt(s.activeOrders)}</div>
+                  <div className="mt-1 text-xs text-zinc-100/60">Pending / processing orders right now.</div>
+                </>
+              )}
+            </div>
+
             <Divider />
+
             <div className="flex flex-wrap gap-2 text-xs">
               <Chip tone="warn">Pending {fmtInt(s.pendingOrders)}</Chip>
               <Chip tone="info">Processing {fmtInt(s.processingOrders)}</Chip>
@@ -966,18 +926,18 @@ export default function Dashboard() {
                   text="Create your first order in under 10 seconds."
                   actions={
                     <>
-                      <a
-                        href="/create-order"
+                      <Link
+                        to="/create-order"
                         className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
                       >
                         <Plus className="h-4 w-4" /> Create order
-                      </a>
-                      <a
-                        href="/services"
+                      </Link>
+                      <Link
+                        to="/services"
                         className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 hover:bg-white/10 active:scale-[0.99]"
                       >
                         <Layers className="h-4 w-4" /> Pick a service
-                      </a>
+                      </Link>
                     </>
                   }
                 />
@@ -1017,26 +977,6 @@ export default function Dashboard() {
                   <Chip tone="neutral">Updated: {relTime(s.lastUpdatedAt)}</Chip>
                 </div>
               </div>
-            )}
-          </Card>
-
-          <Card title="Completed" right={loading ? "" : "Snapshot"} icon={CheckCircle2}>
-            {loading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-7 w-28" />
-                <Skeleton className="h-3 w-44" />
-              </div>
-            ) : (
-              <>
-                <div className="text-3xl font-black tracking-tight">{fmtInt(s.completedOrders)}</div>
-                <div className="mt-1 text-xs text-zinc-100/60">Completed orders.</div>
-                <Divider />
-                <div className="flex flex-wrap gap-2">
-                  <Chip tone={s.failedOrders ? "bad" : "neutral"}>Failed {fmtInt(s.failedOrders)}</Chip>
-                  <Chip tone="info">In progress {fmtInt(s.pendingOrders + s.processingOrders)}</Chip>
-                  <Chip tone="neutral">Total {fmtInt(totalOrdersSnapshot)}</Chip>
-                </div>
-              </>
             )}
           </Card>
 
@@ -1092,15 +1032,15 @@ export default function Dashboard() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-100/60">
-                <a className="underline hover:text-white" href="/terms">
+                <Link className="underline hover:text-white" to="/terms">
                   Terms
-                </a>
-                <a className="underline hover:text-white" href="/privacy">
+                </Link>
+                <Link className="underline hover:text-white" to="/privacy">
                   Privacy
-                </a>
-                <a className="underline hover:text-white" href="/refunds">
+                </Link>
+                <Link className="underline hover:text-white" to="/refunds">
                   Refunds
-                </a>
+                </Link>
                 <span>•</span>
                 <span>Secure-by-default ✅</span>
               </div>
@@ -1168,12 +1108,12 @@ export default function Dashboard() {
                 title="No top-ups found"
                 text="Top up your wallet to unlock instant checkout."
                 actions={
-                  <a
-                    href="/wallet"
+                  <Link
+                    to="/wallet"
                     className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
                   >
                     <CreditCard className="h-4 w-4" /> Go to Wallet
-                  </a>
+                  </Link>
                 }
               />
             )}
@@ -1243,12 +1183,12 @@ export default function Dashboard() {
                 title="No orders found"
                 text="Create your first order — then watch the live metrics update instantly."
                 actions={
-                  <a
-                    href="/create-order"
+                  <Link
+                    to="/create-order"
                     className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/15 active:scale-[0.99]"
                   >
                     <Plus className="h-4 w-4" /> Create order
-                  </a>
+                  </Link>
                 }
               />
             )}
