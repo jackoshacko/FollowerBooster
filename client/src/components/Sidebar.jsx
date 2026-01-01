@@ -16,7 +16,6 @@ import {
   ChevronsRight,
   Sparkles,
   Bell,
-  Settings,
   BadgeCheck,
   AlertCircle,
   Clock,
@@ -26,7 +25,6 @@ import {
   Mail,
   X,
 } from "lucide-react";
-
 import { api, setToken, setUser } from "../lib/api.js";
 
 function cls(...xs) {
@@ -39,6 +37,8 @@ const IS_IOS =
   !window.MSStream;
 
 const DISABLE_BLUR_ON_IOS = IS_IOS;
+
+/* ================= UI atoms ================= */
 
 function RenderIcon({ icon, className }) {
   if (!icon) return null;
@@ -107,8 +107,7 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
       className={({ isActive }) =>
         cls(
           "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition",
-          "border overflow-hidden select-none",
-          "focus:outline-none",
+          "border overflow-hidden select-none focus:outline-none",
           isActive
             ? cls(
                 "border-white/12 bg-white/10 text-white",
@@ -208,6 +207,8 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
+/* ================= Shell ================= */
+
 function SidebarShell({
   children,
   collapsed,
@@ -226,22 +227,27 @@ function SidebarShell({
       ? "bg-zinc-950/95"
       : "bg-zinc-950/90 backdrop-blur-2xl"
     : DISABLE_BLUR_ON_IOS
-    ? "bg-black/55"
-    : "bg-black/35 backdrop-blur-xl";
+    ? "bg-black/65"
+    : "bg-black/45 backdrop-blur-xl";
 
   return (
     <aside
       className={cls(
-        "relative p-4",
-        "border-r border-white/10",
+        "relative border-r border-white/10 p-4",
         glass,
         "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
-        "overflow-x-clip",
-        mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : collapsed ? "w-[98px]" : "w-[310px]",
-        mobile ? "pt-[max(env(safe-area-inset-top),16px)]" : ""
+        "overflow-x-clip"
       )}
+      style={{
+        width: mobile ? "min(86vw, 360px)" : collapsed ? 98 : 310,
+        height: mobile ? "100dvh" : "100vh",
+        paddingTop: mobile ? "max(env(safe-area-inset-top),16px)" : undefined,
+        WebkitOverflowScrolling: "touch",
+      }}
     >
+      {/* Stable background so it never becomes durchsichtig while scrolling */}
       <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-zinc-950/40" />
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
         <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
@@ -322,7 +328,7 @@ function SidebarShell({
 
       <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
 
-      {/* ✅ Single internal scroll for sidebar ONLY */}
+      {/* One internal scroll only */}
       <div className="mt-3 flex flex-col min-h-0" style={{ height: mobile ? "calc(100dvh - 140px)" : "calc(100vh - 140px)" }}>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
           {children}
@@ -333,17 +339,15 @@ function SidebarShell({
   );
 }
 
-/**
- * MobileDrawer wrapper: overlay + slide-in + body scroll lock
- */
+/* ================= Mobile Drawer ================= */
+
 function MobileDrawer({ open, onClose, children }) {
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     const prevPaddingRight = document.body.style.paddingRight;
-
-    // Avoid layout shift when scrollbar disappears (desktop browsers)
     const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+
     document.body.style.overflow = "hidden";
     if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
 
@@ -362,33 +366,32 @@ function MobileDrawer({ open, onClose, children }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] md:hidden">
+    <div className="fixed inset-0 z-[9999] md:hidden">
       {/* overlay */}
       <button
         type="button"
-        className="absolute inset-0 bg-black/60"
+        className="absolute inset-0 bg-black/70"
         onClick={onClose}
         aria-label="Close sidebar"
       />
       {/* panel */}
       <div
-        className={cls(
-          "absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]",
-          "translate-x-0",
-          "animate-[slideIn_.18s_ease-out]"
-        )}
-        style={{
-          animationName: "slideIn",
-        }}
+        className="absolute left-0 top-0 z-[10000] h-[100dvh] w-[min(86vw,360px)]"
+        style={{ animation: "sbSlideIn .18s ease-out" }}
       >
         <style>{`
-          @keyframes slideIn { from { transform: translateX(-8px); opacity: .98; } to { transform: translateX(0); opacity: 1; } }
+          @keyframes sbSlideIn {
+            from { transform: translateX(-10px); opacity: .98; }
+            to   { transform: translateX(0); opacity: 1; }
+          }
         `}</style>
         {children}
       </div>
     </div>
   );
 }
+
+/* ================= Component ================= */
 
 export default function Sidebar({ mobileOpen = false, onClose }) {
   const navigate = useNavigate();
@@ -438,7 +441,6 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     onClose?.();
   };
 
-  // Load /api/me only if token exists
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -754,9 +756,14 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     </>
   );
 
-  // Desktop sidebar (sticky)
+  // ✅ Desktop: FIXED sidebar (no transparency glitch on scroll)
   const desktop = (
-    <div className="hidden md:block sticky top-0 h-screen">
+    <div
+      className={cls(
+        "hidden md:block",
+        "fixed left-0 top-0 z-[50] h-screen"
+      )}
+    >
       <SidebarShell
         mobile={false}
         collapsed={collapsed}
@@ -773,7 +780,7 @@ export default function Sidebar({ mobileOpen = false, onClose }) {
     </div>
   );
 
-  // Mobile drawer (overlay)
+  // ✅ Mobile: real drawer above EVERYTHING
   const mobile = (
     <MobileDrawer open={mobileOpen} onClose={onClose}>
       <SidebarShell
