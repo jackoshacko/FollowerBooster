@@ -1,3 +1,4 @@
+// client/src/components/Sidebar.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -23,6 +24,7 @@ import {
   LifeBuoy,
   FileText,
   Mail,
+  X,
 } from "lucide-react";
 
 import { api, setToken, setUser } from "../lib/api.js";
@@ -30,6 +32,13 @@ import { api, setToken, setUser } from "../lib/api.js";
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
 }
+
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !window.MSStream;
+
+const DISABLE_BLUR_ON_IOS = IS_IOS;
 
 function RenderIcon({ icon, className }) {
   if (!icon) return null;
@@ -55,7 +64,7 @@ function Badge({ children, tone = "zinc", title }) {
       title={title}
       className={cls(
         "ml-auto inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        "backdrop-blur-xl",
+        DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
         toneCls
       )}
     >
@@ -79,7 +88,7 @@ function Chip({ children, tone = "neutral", title }) {
       title={title}
       className={cls(
         "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-        "backdrop-blur-xl",
+        DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
         tones[tone] || tones.neutral
       )}
     >
@@ -99,6 +108,7 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
         cls(
           "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition",
           "border overflow-hidden select-none",
+          "focus:outline-none",
           isActive
             ? cls(
                 "border-white/12 bg-white/10 text-white",
@@ -134,7 +144,7 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
           <span
             className={cls(
               "grid h-9 w-9 place-items-center rounded-2xl border shrink-0 transition",
-              "backdrop-blur-xl",
+              DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
               isActive
                 ? "border-white/14 bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_10px_35px_rgba(168,85,247,0.20)]"
                 : "border-white/10 bg-white/5 group-hover:bg-white/10"
@@ -165,7 +175,12 @@ function Section({ title, icon, collapsed, children }) {
     <div className="mt-5">
       {!collapsed ? (
         <div className="mb-2 flex items-center gap-2 px-2">
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80 backdrop-blur-xl">
+          <span
+            className={cls(
+              "inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-100/80",
+              DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl"
+            )}
+          >
             {icon ? <RenderIcon icon={icon} className="h-3.5 w-3.5" /> : null}
             <span>{title}</span>
           </span>
@@ -177,99 +192,6 @@ function Section({ title, icon, collapsed, children }) {
       )}
       <div className="space-y-1">{children}</div>
     </div>
-  );
-}
-
-function SidebarShell({
-  children,
-  collapsed,
-  setCollapsed,
-  onLogout,
-  loading,
-  title,
-  subtitle,
-  statusPills,
-  footer,
-  mobile,
-}) {
-  return (
-    <aside
-      className={cls(
-        "relative p-4",
-        mobile ? "h-[100dvh]" : "h-screen",
-        mobile
-          ? "border-r border-white/10 bg-zinc-950/95 backdrop-blur-2xl"
-          : "border-r border-white/10 bg-black/35 backdrop-blur-xl",
-        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
-        "overflow-x-clip",
-        collapsed ? "w-[98px]" : "w-[310px]"
-      )}
-    >
-      <div className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
-        <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
-      </div>
-
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0 backdrop-blur-xl">
-            <span className="text-xs font-black tracking-tight text-white">FB</span>
-          </div>
-
-          {!collapsed ? (
-            <div className="leading-tight min-w-0">
-              <div className="text-sm font-extrabold tracking-tight text-white truncate">
-                {title || "FollowerBooster"}
-              </div>
-              <div className="text-xs text-zinc-200/60 truncate">
-                {loading ? "Loading…" : subtitle || "Authenticated"}
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {!mobile ? (
-            <button
-              onClick={() => setCollapsed((v) => !v)}
-              className={cls(
-                "inline-flex items-center justify-center rounded-2xl p-2",
-                "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
-                "hover:bg-white/10 hover:text-white transition",
-                "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
-              )}
-              title={collapsed ? "Expand" : "Collapse"}
-            >
-              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-            </button>
-          ) : null}
-
-          <button
-            onClick={onLogout}
-            className={cls(
-              "inline-flex items-center justify-center rounded-2xl p-2",
-              "border border-white/10 bg-white/5 text-zinc-100/80 backdrop-blur-xl",
-              "hover:bg-white/10 hover:text-white transition"
-            )}
-            title="Logout"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {!collapsed && statusPills ? <div className="mb-3 flex flex-wrap gap-2">{statusPills}</div> : null}
-
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
-
-      <div className="mt-3 flex flex-col min-h-0">
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
-          {children}
-        </div>
-        {footer ? <div className="mt-3">{footer}</div> : null}
-      </div>
-    </aside>
   );
 }
 
@@ -286,7 +208,189 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
-export default function Sidebar({ mobile = false, onClose }) {
+function SidebarShell({
+  children,
+  collapsed,
+  setCollapsed,
+  onLogout,
+  loading,
+  title,
+  subtitle,
+  statusPills,
+  footer,
+  mobile,
+  onClose,
+}) {
+  const glass = mobile
+    ? DISABLE_BLUR_ON_IOS
+      ? "bg-zinc-950/95"
+      : "bg-zinc-950/90 backdrop-blur-2xl"
+    : DISABLE_BLUR_ON_IOS
+    ? "bg-black/55"
+    : "bg-black/35 backdrop-blur-xl";
+
+  return (
+    <aside
+      className={cls(
+        "relative p-4",
+        "border-r border-white/10",
+        glass,
+        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+        "overflow-x-clip",
+        mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : collapsed ? "w-[98px]" : "w-[310px]",
+        mobile ? "pt-[max(env(safe-area-inset-top),16px)]" : ""
+      )}
+    >
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
+        <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
+        <div className="absolute inset-0 bg-[radial-gradient(900px_140px_at_18%_0%,rgba(255,255,255,0.10),transparent_70%)]" />
+      </div>
+
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div
+            className={cls(
+              "grid h-10 w-10 place-items-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] shrink-0",
+              DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl"
+            )}
+          >
+            <span className="text-xs font-black tracking-tight text-white">FB</span>
+          </div>
+
+          {!collapsed ? (
+            <div className="leading-tight min-w-0">
+              <div className="text-sm font-extrabold tracking-tight text-white truncate">
+                {title || "FollowerBooster"}
+              </div>
+              <div className="text-xs text-zinc-200/60 truncate">
+                {loading ? "Loading…" : subtitle || "Authenticated"}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {mobile ? (
+            <button
+              onClick={onClose}
+              className={cls(
+                "inline-flex items-center justify-center rounded-2xl p-2",
+                "border border-white/10 bg-white/5 text-zinc-100/80",
+                DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
+                "hover:bg-white/10 hover:text-white transition"
+              )}
+              title="Close"
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              className={cls(
+                "inline-flex items-center justify-center rounded-2xl p-2",
+                "border border-white/10 bg-white/5 text-zinc-100/80",
+                DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
+                "hover:bg-white/10 hover:text-white transition",
+                "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+              )}
+              title={collapsed ? "Expand" : "Collapse"}
+              type="button"
+            >
+              {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+            </button>
+          )}
+
+          <button
+            onClick={onLogout}
+            className={cls(
+              "inline-flex items-center justify-center rounded-2xl p-2",
+              "border border-white/10 bg-white/5 text-zinc-100/80",
+              DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
+              "hover:bg-white/10 hover:text-white transition"
+            )}
+            title="Logout"
+            type="button"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && statusPills ? <div className="mb-3 flex flex-wrap gap-2">{statusPills}</div> : null}
+
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+
+      {/* ✅ Single internal scroll for sidebar ONLY */}
+      <div className="mt-3 flex flex-col min-h-0" style={{ height: mobile ? "calc(100dvh - 140px)" : "calc(100vh - 140px)" }}>
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.2)_transparent]">
+          {children}
+        </div>
+        {footer ? <div className="mt-3 pb-[max(env(safe-area-inset-bottom),12px)]">{footer}</div> : null}
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * MobileDrawer wrapper: overlay + slide-in + body scroll lock
+ */
+function MobileDrawer({ open, onClose, children }) {
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+
+    // Avoid layout shift when scrollbar disappears (desktop browsers)
+    const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+    document.body.style.overflow = "hidden";
+    if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
+
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60] md:hidden">
+      {/* overlay */}
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+        aria-label="Close sidebar"
+      />
+      {/* panel */}
+      <div
+        className={cls(
+          "absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]",
+          "translate-x-0",
+          "animate-[slideIn_.18s_ease-out]"
+        )}
+        style={{
+          animationName: "slideIn",
+        }}
+      >
+        <style>{`
+          @keyframes slideIn { from { transform: translateX(-8px); opacity: .98; } to { transform: translateX(0); opacity: 1; } }
+        `}</style>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export default function Sidebar({ mobileOpen = false, onClose }) {
   const navigate = useNavigate();
   const loc = useLocation();
 
@@ -305,7 +409,6 @@ export default function Sidebar({ mobile = false, onClose }) {
 
   const isAdmin = me?.role === "admin";
   const isOnAdmin = loc.pathname.startsWith("/admin");
-
   const authed = !!localStorage.getItem("token");
 
   useEffect(() => {
@@ -316,25 +419,14 @@ export default function Sidebar({ mobile = false, onClose }) {
     setToken("");
     setUser(null);
     localStorage.removeItem("role");
-    if (typeof onClose === "function") onClose();
+    onClose?.();
     navigate("/login", { replace: true });
   }
 
-  // ✅ if guest clicks protected routes: go login
   function guard(to) {
-    const needsAuth = [
-      "/dashboard",
-      "/create-order",
-      "/orders",
-      "/wallet",
-      "/admin/dashboard",
-      "/admin/services",
-      "/admin/users",
-      "/admin/orders",
-      "/admin/transactions",
-    ];
+    const needsAuth = ["/dashboard", "/create-order", "/orders", "/wallet", "/admin"];
     if (!authed && needsAuth.some((p) => String(to).startsWith(p))) {
-      if (mobile && typeof onClose === "function") onClose();
+      onClose?.();
       navigate("/login", { replace: true });
       return false;
     }
@@ -343,10 +435,10 @@ export default function Sidebar({ mobile = false, onClose }) {
 
   const navClick = (to) => {
     if (!guard(to)) return;
-    if (mobile && typeof onClose === "function") onClose();
+    onClose?.();
   };
 
-  // Load me only if token exists (prevents useless redirects when not logged)
+  // Load /api/me only if token exists
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -364,7 +456,6 @@ export default function Sidebar({ mobile = false, onClose }) {
       } catch {
         if (!alive) return;
         setMe(null);
-        // only logout redirect inside app; sidebar is mostly used in app anyway
         hardLogout();
       } finally {
         if (!alive) return;
@@ -447,8 +538,8 @@ export default function Sidebar({ mobile = false, onClose }) {
     if (!live) return;
 
     const ms = isOnAdmin ? 15000 : 22000;
-
     if (pollRef.current) clearInterval(pollRef.current);
+
     pollRef.current = setInterval(() => {
       loadSidebarMetrics({ silent: true });
       loadAdminStats({ silent: true });
@@ -461,8 +552,7 @@ export default function Sidebar({ mobile = false, onClose }) {
   }, [me, live, isOnAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const emailLabel = useMemo(() => {
-    const email = me?.email || me?.username || me?.name;
-    return email || (authed ? "Authenticated" : "Guest");
+    return me?.email || me?.username || me?.name || (authed ? "Authenticated" : "Guest");
   }, [me, authed]);
 
   const roleLabel = useMemo(() => {
@@ -503,8 +593,8 @@ export default function Sidebar({ mobile = false, onClose }) {
         type="button"
         onClick={() => setLive((v) => !v)}
         className={cls(
-          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-          "backdrop-blur-xl transition",
+          "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold transition",
+          DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl",
           live
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
             : "border-white/10 bg-white/5 text-zinc-100/70 hover:bg-white/10"
@@ -516,8 +606,13 @@ export default function Sidebar({ mobile = false, onClose }) {
     </>
   );
 
-  const footer = !collapsed ? (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
+  const footer = (
+    <div
+      className={cls(
+        "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]",
+        DISABLE_BLUR_ON_IOS ? "" : "backdrop-blur-xl"
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -530,12 +625,16 @@ export default function Sidebar({ mobile = false, onClose }) {
         </div>
 
         <button
-          onClick={() => (authed ? navigate("/wallet") : navigate("/login"))}
+          onClick={() => {
+            onClose?.();
+            navigate(authed ? "/wallet" : "/login");
+          }}
           className={cls(
             "inline-flex items-center gap-1 rounded-2xl px-3 py-2 text-[11px] font-semibold",
             "border border-white/10 bg-white/5 hover:bg-white/10 transition"
           )}
           title="Go to Wallet"
+          type="button"
         >
           <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
@@ -543,20 +642,28 @@ export default function Sidebar({ mobile = false, onClose }) {
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
-          onClick={() => (authed ? navigate("/create-order") : navigate("/login"))}
+          onClick={() => {
+            onClose?.();
+            navigate(authed ? "/create-order" : "/login");
+          }}
           className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
+          type="button"
         >
           {authed ? "Create order" : "Sign in"}
         </button>
         <button
-          onClick={() => navigate("/services")}
+          onClick={() => {
+            onClose?.();
+            navigate("/services");
+          }}
           className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
+          type="button"
         >
           Services
         </button>
       </div>
 
-      {isAdmin ? (
+      {authed && isAdmin ? (
         <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
           <div className="flex items-center justify-between">
             <div className="text-[11px] text-zinc-200/70">Admin (30d)</div>
@@ -568,37 +675,17 @@ export default function Sidebar({ mobile = false, onClose }) {
         </div>
       ) : null}
     </div>
-  ) : (
-    <div className="mt-3 flex justify-center">
-      <div className="h-10 w-10 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl" />
-    </div>
   );
 
   const content = (
     <>
-      {/* ✅ GUEST CAN SEE SERVICES ALWAYS */}
       <Section title="Browse" icon={Sparkles} collapsed={collapsed}>
         <Item to="/services" icon={ListChecks} label="Services" collapsed={collapsed} onClick={() => navClick("/services")} />
       </Section>
 
-      {/* ✅ Protected section (requires login) */}
       <Section title="User" icon={Shield} collapsed={collapsed}>
-        <Item
-          to={authed ? "/dashboard" : "/login"}
-          icon={LayoutDashboard}
-          label="Dashboard"
-          collapsed={collapsed}
-          onClick={() => navClick("/dashboard")}
-        />
-
-        <Item
-          to={authed ? "/create-order" : "/login"}
-          icon={ShoppingCart}
-          label="Create order"
-          collapsed={collapsed}
-          onClick={() => navClick("/create-order")}
-        />
-
+        <Item to={authed ? "/dashboard" : "/login"} icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/dashboard")} />
+        <Item to={authed ? "/create-order" : "/login"} icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={() => navClick("/create-order")} />
         <Item
           to={authed ? "/orders" : "/login"}
           icon={ListChecks}
@@ -607,16 +694,12 @@ export default function Sidebar({ mobile = false, onClose }) {
           onClick={() => navClick("/orders")}
           right={
             authed && myOrdersCount !== null ? (
-              <Badge
-                title="Your orders"
-                tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}
-              >
+              <Badge title="Your orders" tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}>
                 {myOrdersCount}
               </Badge>
             ) : null
           }
         />
-
         <Item
           to={authed ? "/wallet" : "/login"}
           icon={Wallet}
@@ -633,39 +716,22 @@ export default function Sidebar({ mobile = false, onClose }) {
         />
       </Section>
 
-      {/* Account card only if authed */}
-      {authed ? (
-        <Section title="Account" icon={Settings} collapsed={collapsed}>
-          <div
-            className={cls(
-              "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-100/75 backdrop-blur-xl",
-              collapsed ? "hidden" : ""
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-semibold text-white/90 truncate">{emailLabel}</div>
-                <div className="mt-0.5 text-[11px] text-zinc-200/60">Role: {roleLabel}</div>
-              </div>
-              <button
-                onClick={hardLogout}
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
-                title="Logout"
-              >
-                <LogOut className="h-4 w-4" /> Logout
-              </button>
-            </div>
-          </div>
-        </Section>
-      ) : null}
+      <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
+        <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
+        <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
+      </Section>
 
-      {/* Admin only */}
+      <Section title="Legal" icon={FileText} collapsed={collapsed}>
+        <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
+        <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
+        <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
+      </Section>
+
       {authed && isAdmin ? (
         <Section title="Admin" icon={Wrench} collapsed={collapsed}>
           <Item to="/admin/dashboard" icon={BarChart3} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/admin/dashboard")} />
           <Item to="/admin/services" icon={Wrench} label="Services" collapsed={collapsed} onClick={() => navClick("/admin/services")} />
           <Item to="/admin/users" icon={Users} label="Users" collapsed={collapsed} onClick={() => navClick("/admin/users")} />
-
           <Item
             to="/admin/orders"
             icon={ListChecks}
@@ -682,60 +748,55 @@ export default function Sidebar({ mobile = false, onClose }) {
               )
             }
           />
-
           <Item to="/admin/transactions" icon={Receipt} label="Transactions" collapsed={collapsed} onClick={() => navClick("/admin/transactions")} />
         </Section>
       ) : null}
-
-      {/* ✅ Support + Legal (available to everyone) */}
-      <Section title="Support" icon={LifeBuoy} collapsed={collapsed}>
-        <Item to="/faq" icon={Bell} label="Help / FAQ" collapsed={collapsed} onClick={() => navClick("/faq")} />
-        <Item to="/contact" icon={Mail} label="Contact" collapsed={collapsed} onClick={() => navClick("/contact")} />
-      </Section>
-
-      <Section title="Legal" icon={FileText} collapsed={collapsed}>
-        <Item to="/terms" icon={Receipt} label="Terms" collapsed={collapsed} onClick={() => navClick("/terms")} />
-        <Item to="/privacy" icon={Shield} label="Privacy" collapsed={collapsed} onClick={() => navClick("/privacy")} />
-        <Item to="/refund" icon={AlertCircle} label="Refunds" collapsed={collapsed} onClick={() => navClick("/refund")} />
-      </Section>
     </>
   );
 
-  if (!mobile) {
-    return (
-      <div className="sticky top-0 hidden md:block">
-        <SidebarShell
-          mobile={false}
-          collapsed={collapsed}
-          setCollapsed={setCollapsed}
-          onLogout={hardLogout}
-          loading={loading}
-          title="FollowerBooster"
-          subtitle={emailLabel}
-          statusPills={statusPills}
-          footer={footer}
-        >
-          {content}
-        </SidebarShell>
-      </div>
-    );
-  }
+  // Desktop sidebar (sticky)
+  const desktop = (
+    <div className="hidden md:block sticky top-0 h-screen">
+      <SidebarShell
+        mobile={false}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        onLogout={hardLogout}
+        loading={loading}
+        title="FollowerBooster"
+        subtitle={emailLabel}
+        statusPills={statusPills}
+        footer={footer}
+      >
+        {content}
+      </SidebarShell>
+    </div>
+  );
+
+  // Mobile drawer (overlay)
+  const mobile = (
+    <MobileDrawer open={mobileOpen} onClose={onClose}>
+      <SidebarShell
+        mobile
+        collapsed={false}
+        setCollapsed={() => {}}
+        onLogout={hardLogout}
+        loading={loading}
+        title="FollowerBooster"
+        subtitle={emailLabel}
+        statusPills={statusPills}
+        footer={footer}
+        onClose={onClose}
+      >
+        {content}
+      </SidebarShell>
+    </MobileDrawer>
+  );
 
   return (
-    <SidebarShell
-      mobile
-      collapsed={false}
-      setCollapsed={() => {}}
-      onLogout={hardLogout}
-      loading={loading}
-      title="FollowerBooster"
-      subtitle={emailLabel}
-      statusPills={statusPills}
-      footer={footer}
-    >
-      {content}
-    </SidebarShell>
+    <>
+      {desktop}
+      {mobile}
+    </>
   );
 }
-
-
