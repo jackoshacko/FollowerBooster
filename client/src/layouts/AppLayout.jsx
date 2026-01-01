@@ -1,6 +1,6 @@
 // client/src/layouts/AppLayout.jsx
 import React, { useEffect, useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar.jsx";
 import Topbar from "../components/Topbar.jsx";
 import CookieNotice from "../components/CookieNotice.jsx";
@@ -8,8 +8,9 @@ import bgSmm from "../assets/backgroundsmm.jpg";
 
 export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const loc = useLocation();
 
-  // hard reset: ako je nekad ostao body lock (drawer/modal), vrati ga čim layout mounta
+  // ✅ hard reset: ako je nekad ostao body lock (drawer/modal), vrati ga čim layout mounta
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
@@ -24,6 +25,11 @@ export default function AppLayout() {
 
     if (body.dataset) body.dataset.scrollY = "";
   }, []);
+
+  // ✅ kad promeniš stranicu, ugasi drawer (sprečava "glitch")
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [loc.pathname]);
 
   return (
     <div className="min-h-[100dvh] w-full overflow-x-clip bg-zinc-950 text-zinc-100">
@@ -42,17 +48,12 @@ export default function AppLayout() {
       </div>
 
       <div className="relative z-10 flex min-h-[100dvh] w-full overflow-x-clip">
-        {/* Desktop sidebar */}
-        <aside className="hidden md:block">
-          <Sidebar />
-        </aside>
-
-        {/* Mobile sidebar (drawer overlay) */}
+        {/* ✅ Sidebar renderuj TAČNO JEDNOM (on sam rešava desktop+mobile) */}
         <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
 
         {/* MAIN */}
         <div className="relative flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-x-clip">
-          {/* Topbar (prosledi handler da otvori drawer na telefonu) */}
+          {/* Topbar */}
           <div className="sticky top-0 z-40">
             <Topbar onOpenSidebar={() => setMobileOpen(true)} />
           </div>
@@ -63,7 +64,6 @@ export default function AppLayout() {
               className={[
                 "mx-auto w-full min-w-0 max-w-[1200px] 2xl:max-w-[1400px]",
                 "px-4 py-4 md:px-6 md:py-6",
-                // ✅ malo više bottom padding da se ne “zalepi” za home bar na iOS
                 "pb-[calc(env(safe-area-inset-bottom)+24px)]",
               ].join(" ")}
             >
