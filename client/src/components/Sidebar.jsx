@@ -84,13 +84,16 @@ function MobileDrawer({ open, onClose, children }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[999] md:hidden">
+    <div className="fixed inset-0 z-[9999] md:hidden">
+      {/* overlay */}
       <button
         type="button"
         className="absolute inset-0 bg-black/70"
         onClick={onClose}
         aria-label="Close sidebar"
       />
+
+      {/* panel */}
       <div className="absolute left-0 top-0 h-[100dvh] w-[86vw] max-w-[360px]">
         {children}
       </div>
@@ -188,7 +191,6 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
               isActive ? "opacity-100" : "opacity-0"
             )}
           />
-
           <span
             className={cls(
               "pointer-events-none absolute inset-0",
@@ -197,7 +199,6 @@ function Item({ to, icon, label, collapsed, right, onClick }) {
               isActive ? "opacity-100" : "opacity-0"
             )}
           />
-
           <span
             className={cls(
               "grid h-9 w-9 place-items-center rounded-2xl border shrink-0 transition",
@@ -259,16 +260,27 @@ function SidebarShell({
   return (
     <aside
       className={cls(
-        "relative p-4",
+        "relative p-4 text-zinc-100",
+        // ✅ width rules: desktop uses collapsed width; mobile always drawer width
         mobile ? "h-[100dvh] w-[86vw] max-w-[360px]" : "h-screen",
         mobile
-          ? `border-r border-white/10 bg-zinc-950/95 ${IS_IOS ? "" : "backdrop-blur-2xl"}`
-          : `border-r border-white/10 bg-black/35 ${IS_IOS ? "" : "backdrop-blur-xl"}`,
-        "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
-        "overflow-x-clip",
-        collapsed ? "w-[98px]" : "w-[310px]"
+          ? cls(
+              "border-r border-white/10",
+              "bg-zinc-950/95", // ✅ solid base (fix “sivo / nema teksta”)
+              IS_IOS ? "" : "backdrop-blur-2xl",
+              "shadow-[0_18px_80px_rgba(0,0,0,0.55)]"
+            )
+          : cls(
+              "border-r border-white/10",
+              "bg-black/35",
+              IS_IOS ? "" : "backdrop-blur-xl",
+              "shadow-[inset_-1px_0_0_rgba(255,255,255,0.04)]",
+              collapsed ? "w-[98px]" : "w-[310px]"
+            ),
+        "overflow-x-clip"
       )}
     >
+      {/* background glow */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -left-24 top-10 h-72 w-72 rounded-full bg-purple-500/14 blur-3xl" />
         <div className="absolute -left-10 bottom-10 h-72 w-72 rounded-full bg-cyan-500/12 blur-3xl" />
@@ -288,8 +300,12 @@ function SidebarShell({
 
           {!collapsed ? (
             <div className="leading-tight min-w-0">
-              <div className="text-sm font-extrabold tracking-tight text-white truncate">{title || "FollowerBooster"}</div>
-              <div className="text-xs text-zinc-200/60 truncate">{loading ? "Loading…" : subtitle || "Authenticated"}</div>
+              <div className="text-sm font-extrabold tracking-tight text-white truncate">
+                {title || "FollowerBooster"}
+              </div>
+              <div className="text-xs text-zinc-200/60 truncate">
+                {loading ? "Loading…" : subtitle || "Authenticated"}
+              </div>
             </div>
           ) : null}
         </div>
@@ -316,8 +332,7 @@ function SidebarShell({
                 "inline-flex items-center justify-center rounded-2xl p-2",
                 "border border-white/10 bg-white/5 text-zinc-100/80",
                 BLUR,
-                "hover:bg-white/10 hover:text-white transition",
-                "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+                "hover:bg-white/10 hover:text-white transition"
               )}
               title={collapsed ? "Expand" : "Collapse"}
               type="button"
@@ -369,7 +384,6 @@ function fmtMoney(n, cur = "EUR") {
   }
 }
 
-// ✅ shared logic/content (da ne dupliramo)
 function useSidebarData(onClose) {
   const navigate = useNavigate();
   const loc = useLocation();
@@ -540,30 +554,21 @@ function useSidebarData(onClose) {
     return email || (authed ? "Authenticated" : "Guest");
   }, [me, authed]);
 
-  const roleLabel = useMemo(() => {
-    const r = String(me?.role || "customer").toUpperCase();
-    return r === "ADMIN" ? "ADMIN" : authed ? "CUSTOMER" : "GUEST";
-  }, [me, authed]);
-
-  const pendingOrders = Number(adminStats?.ordersActive ?? adminStats?.pendingOrders ?? 0);
-  const revenue30d = adminStats?.revenue30d ?? adminStats?.revenue ?? null;
-
-  const walletTone = walletSnap.balance == null ? "neutral" : walletSnap.balance > 0 ? "ok" : "warn";
-  const riskTone =
-    (opsSnap.failed || 0) > 0 ? "bad" : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? "warn" : "ok";
-
   const statusPills = (
     <>
       <Chip tone="violet" title="Premium UI mode">
         <Sparkles className="h-3.5 w-3.5" /> 2050
       </Chip>
 
-      <Chip tone={walletTone} title="Wallet balance snapshot">
+      <Chip tone={walletSnap.balance == null ? "neutral" : walletSnap.balance > 0 ? "ok" : "warn"} title="Wallet balance snapshot">
         <Wallet className="h-3.5 w-3.5" />{" "}
         {walletSnap.balance == null ? "Wallet —" : fmtMoney(walletSnap.balance, walletSnap.currency)}
       </Chip>
 
-      <Chip tone={riskTone} title="Orders health (approx)">
+      <Chip
+        tone={(opsSnap.failed || 0) > 0 ? "bad" : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? "warn" : "ok"}
+        title="Orders health (approx)"
+      >
         {(opsSnap.failed || 0) > 0 ? (
           <AlertCircle className="h-3.5 w-3.5" />
         ) : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? (
@@ -571,7 +576,7 @@ function useSidebarData(onClose) {
         ) : (
           <BadgeCheck className="h-3.5 w-3.5" />
         )}
-        {riskTone === "ok" ? "Clean" : riskTone === "warn" ? "Active" : "Issues"}
+        {(opsSnap.failed || 0) > 0 ? "Issues" : (opsSnap.pending || 0) + (opsSnap.processing || 0) > 0 ? "Active" : "Clean"}
       </Chip>
 
       <button
@@ -592,69 +597,21 @@ function useSidebarData(onClose) {
     </>
   );
 
-  const footer = !collapsed ? (
-    <div
-      className={cls(
-        "rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70 shadow-[0_0_0_1px_rgba(255,255,255,0.04)]",
-        BLUR
-      )}
-    >
+  const footer = (
+    <div className={cls("rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70", BLUR)}>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="font-semibold text-zinc-100 truncate">FollowerBooster</div>
-            <Chip tone={roleLabel === "ADMIN" ? "info" : "neutral"}>{roleLabel}</Chip>
-          </div>
-          <div className="mt-1 text-[11px] text-zinc-200/60 truncate">
-            {me?.email || (authed ? "Authenticated • Wallet-ready • Premium UI" : "Guest • Browse services")}
-          </div>
+          <div className="font-semibold text-zinc-100 truncate">FollowerBooster</div>
+          <div className="mt-1 text-[11px] text-zinc-200/60 truncate">{me?.email || emailLabel}</div>
         </div>
-
         <button
           onClick={() => (authed ? navigate("/wallet") : navigate("/login"))}
-          className={cls(
-            "inline-flex items-center gap-1 rounded-2xl px-3 py-2 text-[11px] font-semibold",
-            "border border-white/10 bg-white/5 hover:bg-white/10 transition"
-          )}
-          title="Go to Wallet"
+          className="inline-flex items-center gap-1 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold hover:bg-white/10 transition"
           type="button"
         >
           <ArrowUpRight className="h-4 w-4" /> {authed ? "Wallet" : "Login"}
         </button>
       </div>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          onClick={() => (authed ? navigate("/create-order") : navigate("/login"))}
-          className="rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white hover:bg-white/15 transition"
-          type="button"
-        >
-          {authed ? "Create order" : "Sign in"}
-        </button>
-        <button
-          onClick={() => navigate("/services")}
-          className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/90 hover:bg-white/10 transition"
-          type="button"
-        >
-          Services
-        </button>
-      </div>
-
-      {isAdmin ? (
-        <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 p-3">
-          <div className="flex items-center justify-between">
-            <div className="text-[11px] text-zinc-200/70">Admin (30d)</div>
-            <Chip tone="neutral">
-              <BarChart3 className="h-3.5 w-3.5" />{" "}
-              {revenue30d != null ? `${Number(revenue30d).toFixed?.(2) ?? revenue30d} EUR` : "—"}
-            </Chip>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  ) : (
-    <div className="mt-3 flex justify-center">
-      <div className={cls("h-10 w-10 rounded-2xl border border-white/10 bg-white/5", BLUR)} />
     </div>
   );
 
@@ -667,34 +624,8 @@ function useSidebarData(onClose) {
       <Section title="User" icon={Shield} collapsed={collapsed}>
         <Item to={authed ? "/dashboard" : "/login"} icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} onClick={() => navClick("/dashboard")} />
         <Item to={authed ? "/create-order" : "/login"} icon={ShoppingCart} label="Create order" collapsed={collapsed} onClick={() => navClick("/create-order")} />
-        <Item
-          to={authed ? "/orders" : "/login"}
-          icon={ListChecks}
-          label="Orders"
-          collapsed={collapsed}
-          onClick={() => navClick("/orders")}
-          right={
-            authed && myOrdersCount !== null ? (
-              <Badge title="Your orders" tone={(opsSnap.failed || 0) > 0 ? "red" : (opsSnap.active || 0) > 0 ? "amber" : "zinc"}>
-                {myOrdersCount}
-              </Badge>
-            ) : null
-          }
-        />
-        <Item
-          to={authed ? "/wallet" : "/login"}
-          icon={Wallet}
-          label="Wallet"
-          collapsed={collapsed}
-          onClick={() => navClick("/wallet")}
-          right={
-            authed && !collapsed && walletSnap.balance != null ? (
-              <Badge title="Balance" tone={walletSnap.balance > 0 ? "green" : "amber"}>
-                {fmtMoney(walletSnap.balance, walletSnap.currency)}
-              </Badge>
-            ) : null
-          }
-        />
+        <Item to={authed ? "/orders" : "/login"} icon={ListChecks} label="Orders" collapsed={collapsed} onClick={() => navClick("/orders")} />
+        <Item to={authed ? "/wallet" : "/login"} icon={Wallet} label="Wallet" collapsed={collapsed} onClick={() => navClick("/wallet")} />
       </Section>
 
       {authed && isAdmin ? (
@@ -720,30 +651,12 @@ function useSidebarData(onClose) {
     </>
   );
 
-  return {
-    collapsed,
-    setCollapsed,
-    hardLogout,
-    loading,
-    emailLabel,
-    statusPills,
-    footer,
-    content,
-  };
+  return { collapsed, setCollapsed, hardLogout, loading, emailLabel, statusPills, footer, content };
 }
 
-// ✅ Desktop sidebar (default export)
+// ✅ Desktop sidebar
 export default function Sidebar() {
-  const {
-    collapsed,
-    setCollapsed,
-    hardLogout,
-    loading,
-    emailLabel,
-    statusPills,
-    footer,
-    content,
-  } = useSidebarData();
+  const { collapsed, setCollapsed, hardLogout, loading, emailLabel, statusPills, footer, content } = useSidebarData();
 
   return (
     <div className="sticky top-0 hidden md:block">
@@ -764,16 +677,9 @@ export default function Sidebar() {
   );
 }
 
-// ✅ Mobile drawer sidebar (named export)
+// ✅ Mobile drawer sidebar
 export function SidebarDrawer({ open, onClose }) {
-  const {
-    hardLogout,
-    loading,
-    emailLabel,
-    statusPills,
-    footer,
-    content,
-  } = useSidebarData(onClose);
+  const { hardLogout, loading, emailLabel, statusPills, footer, content } = useSidebarData(onClose);
 
   return (
     <MobileDrawer open={open} onClose={onClose}>
