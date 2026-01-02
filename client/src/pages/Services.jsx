@@ -621,7 +621,7 @@ function saveFavs(set) {
   } catch {}
 }
 
-/* ------------------------------ Topbar offset (as you already use) ------------------------------ */
+/* ------------------------------ Topbar offset ------------------------------ */
 /**
  * Measures ONLY real topbar.
  * Requirement: Topbar wrapper must have id="app-topbar" OR data-topbar="app".
@@ -667,14 +667,20 @@ function useTopbarOffset(extra = 12) {
   return top;
 }
 
-/* ------------------------------ FIX: Smart affix (works even if sticky is broken by overflow parents) ------------------------------ */
+/* ------------------------------ FIX: Smart affix ------------------------------ */
+/**
+ * PROBLEM: u app layoutu često scroll nije window nego neki wrapper div (overflow-y-auto).
+ * REŠENJE: slušaj scroll na documentu u CAPTURE modu → hvata scroll bilo kog scroll-container-a.
+ */
 
 function getScrollParent(el) {
   let cur = el;
   while (cur && cur !== document.body) {
     const s = window.getComputedStyle(cur);
     const oy = s.overflowY;
-    if (oy === "auto" || oy === "scroll") return cur;
+    const isScrollable =
+      (oy === "auto" || oy === "scroll" || oy === "overlay") && cur.scrollHeight > cur.clientHeight + 1;
+    if (isScrollable) return cur;
     cur = cur.parentElement;
   }
   return window;
@@ -690,8 +696,8 @@ function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
     const bar = barRef.current;
     if (!container || !sentinel || !bar) return;
 
+    // we still compute left/width based on container
     const scrollParent = getScrollParent(container);
-    const target = scrollParent === window ? window : scrollParent;
 
     let raf = 0;
 
@@ -714,9 +720,18 @@ function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
       });
     };
 
+    // initial
     tick();
-    target.addEventListener("scroll", tick, { passive: true });
+
+    // ✅ IMPORTANT: capture scroll from ANY scroll container (window OR nested)
+    const onDocScroll = () => tick();
+
+    document.addEventListener("scroll", onDocScroll, { passive: true, capture: true });
     window.addEventListener("resize", tick);
+
+    // also listen to the probable scroll parent (not required but fine)
+    const sp = scrollParent === window ? window : scrollParent;
+    sp.addEventListener?.("scroll", tick, { passive: true });
 
     let ro = null;
     if ("ResizeObserver" in window) {
@@ -727,8 +742,9 @@ function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
 
     return () => {
       cancelAnimationFrame(raf);
-      target.removeEventListener("scroll", tick);
+      document.removeEventListener("scroll", onDocScroll, true);
       window.removeEventListener("resize", tick);
+      sp.removeEventListener?.("scroll", tick);
       if (ro) ro.disconnect();
     };
   }, [containerRef, sentinelRef, barRef, top]);
@@ -739,7 +755,7 @@ function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
         top: `${top}px`,
         left: `${rect.left}px`,
         width: `${rect.width}px`,
-        zIndex: 30,
+        zIndex: 40,
       }
     : { position: "relative" };
 
@@ -1130,7 +1146,7 @@ export default function Services() {
       {affix.placeholderH ? <div style={{ height: affix.placeholderH }} /> : null}
 
       <div style={affix.style}>
-        {/* same "glued" look like you had */}
+        {/* same "glued" look */}
         <div className="relative">
           <div className="pointer-events-none absolute inset-x-0 -top-4 h-4 bg-black/40" />
         </div>
