@@ -126,9 +126,8 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
     return () => {
       document.body.style.overflow = prev;
 
-      // ✅ iOS sticky/backdrop fix: nakon unlock-a, “prodrmaj” layout 1 frame
+      // iOS relayout nudge
       requestAnimationFrame(() => {
-        // no-op but forces relayout on some mobile browsers
         document.documentElement.scrollTop = document.documentElement.scrollTop;
       });
     };
@@ -148,7 +147,10 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
 
   return (
     <div className="fixed inset-0 z-[999] px-3 py-6 md:py-10">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
       <div
         ref={ref}
         className={cls(
@@ -298,6 +300,29 @@ export default function ServicesPublic() {
   const [selected, setSelected] = useState(null);
   const [openModal, setOpenModal] = useState(false);
 
+  // ✅ PERFORMANCE: paginate client-side to reduce mobile lag
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia?.("(max-width: 768px)")?.matches ?? window.innerWidth < 768;
+  });
+
+  useEffect(() => {
+    const mq = window.matchMedia?.("(max-width: 768px)");
+    if (!mq) return;
+    const onChange = (e) => setIsMobile(!!e.matches);
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+
+  const INITIAL_COUNT = isMobile ? 24 : 36;
+  const STEP = isMobile ? 24 : 36;
+
+  const [visibleCount, setVisibleCount] = useState(INITIAL_COUNT);
+
   // keep authed in sync (same tab + other tabs)
   useEffect(() => {
     const sync = () => setAuthed(!!localStorage.getItem("token"));
@@ -378,20 +403,17 @@ export default function ServicesPublic() {
     }
 
     if (onlyInStock) {
-      // heuristic: enabled !== false
       arr = arr.filter((x) => x?.enabled !== false);
     }
 
     // sort
     if (sort === "priceAsc")
       arr.sort(
-        (a, b) =>
-          Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0)
+        (a, b) => Number(a?.pricePer1000 || 0) - Number(b?.pricePer1000 || 0)
       );
     if (sort === "priceDesc")
       arr.sort(
-        (a, b) =>
-          Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0)
+        (a, b) => Number(b?.pricePer1000 || 0) - Number(a?.pricePer1000 || 0)
       );
     if (sort === "nameAsc")
       arr.sort((a, b) =>
@@ -400,6 +422,18 @@ export default function ServicesPublic() {
 
     return arr;
   }, [list, q, platform, category, sort, onlyInStock]);
+
+  // ✅ reset pagination when filters change OR device count changes
+  useEffect(() => {
+    setVisibleCount(INITIAL_COUNT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, platform, category, sort, onlyInStock, INITIAL_COUNT]);
+
+  const shown = useMemo(() => {
+    return filtered.slice(0, Math.max(0, visibleCount));
+  }, [filtered, visibleCount]);
+
+  const hasMore = shown.length < filtered.length;
 
   const kpis = useMemo(() => {
     const total = list.length;
@@ -423,7 +457,6 @@ export default function ServicesPublic() {
   function onBuy(serviceId) {
     const target = `/app/create-order?serviceId=${encodeURIComponent(serviceId)}`;
 
-    // guest → login + next redirect back to create-order
     if (!authed) return nav(`/login?next=${buildNext(target)}`);
 
     nav(target);
@@ -435,7 +468,6 @@ export default function ServicesPublic() {
   }
 
   const tabs = useMemo(() => {
-    // show up to 7 categories as “tabs”, rest stay in dropdown filter
     const base = categories.slice(0, 7);
     return base;
   }, [categories]);
@@ -502,14 +534,13 @@ export default function ServicesPublic() {
         </div>
       </div>
 
-      {/* CATEGORY TABS (2050 vibe) */}
+      {/* CATEGORY TABS */}
       <div className={cls("mb-4 rounded-3xl p-3", isGlass)}>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-2">
             {tabs.map((t) => {
               const active =
-                (t === "all" && category === "all") ||
-                (t !== "all" && t === category);
+                (t === "all" && category === "all") || (t !== "all" && t === category);
               return (
                 <button
                   key={t}
@@ -528,26 +559,17 @@ export default function ServicesPublic() {
           </div>
 
           <div className="text-xs text-zinc-300/70">
-            Tip: use filters below for full precision (platform, category, search).
+            Tip: use filters below for full precision.
           </div>
         </div>
       </div>
 
-      {/* ✅ STICKY FILTER BAR — FIXED for ALL devices */}
-      {/* Key: top uses the same public header height: var(--pubTop) */}
+      {/* FILTER BAR */}
       <div
-        className={cls(
-          "sticky z-[90] mb-5",
-          "transform-gpu"
-        )}
-        style={{
-          top: "var(--pubTop)",
-          willChange: "transform",
-        }}
+        className={cls("sticky z-[90] mb-5", "transform-gpu")}
+        style={{ top: "var(--pubTop)", willChange: "transform" }}
       >
-        {/* small premium separator to look “locked” under the topbar */}
         <div className="h-px w-full bg-gradient-to-r from-transparent via-white/18 to-transparent opacity-70" />
-
         <div className={cls("rounded-3xl p-3 md:p-4", isGlass, "bg-zinc-950/60")}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
@@ -591,18 +613,10 @@ export default function ServicesPublic() {
                 onChange={(e) => setSort(e.target.value)}
                 className="w-full sm:w-[190px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white backdrop-blur-xl"
               >
-                <option value="pop" className="bg-zinc-900">
-                  Sort
-                </option>
-                <option value="nameAsc" className="bg-zinc-900">
-                  Name A–Z
-                </option>
-                <option value="priceAsc" className="bg-zinc-900">
-                  Price ↑
-                </option>
-                <option value="priceDesc" className="bg-zinc-900">
-                  Price ↓
-                </option>
+                <option value="pop" className="bg-zinc-900">Sort</option>
+                <option value="nameAsc" className="bg-zinc-900">Name A–Z</option>
+                <option value="priceAsc" className="bg-zinc-900">Price ↑</option>
+                <option value="priceDesc" className="bg-zinc-900">Price ↓</option>
               </select>
 
               <button
@@ -614,7 +628,6 @@ export default function ServicesPublic() {
                     ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
                     : "border-white/10 bg-white/5 text-white/85 hover:bg-white/10 hover:border-white/20"
                 )}
-                title="Show only enabled services"
               >
                 {onlyInStock ? "Enabled only" : "All (incl. disabled)"}
               </button>
@@ -622,8 +635,10 @@ export default function ServicesPublic() {
 
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-zinc-300/70">
-                Showing <span className="text-white/90 font-semibold">{filtered.length}</span>{" "}
-                of <span className="text-white/90 font-semibold">{list.length}</span>
+                Showing{" "}
+                <span className="text-white/90 font-semibold">{shown.length}</span>{" "}
+                of{" "}
+                <span className="text-white/90 font-semibold">{filtered.length}</span>
               </div>
 
               <button
@@ -658,105 +673,123 @@ export default function ServicesPublic() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((s) => {
-            const id = s?._id || s?.id;
-            const cur = s?.currency || "EUR";
-            const price = s?.pricePer1000 ?? s?.price ?? 0;
+        <>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {shown.map((s) => {
+              const id = s?._id || s?.id;
+              const cur = s?.currency || "EUR";
+              const price = s?.pricePer1000 ?? s?.price ?? 0;
 
-            const enabled = s?.enabled !== false;
-            const disabled = !id || !enabled;
+              const enabled = s?.enabled !== false;
+              const disabled = !id || !enabled;
 
-            const tone = !enabled ? "bad" : price > 0 ? "ok" : "warn";
+              return (
+                <div
+                  key={id || `${s?.name || "service"}-${Math.random()}`}
+                  className={cls(
+                    "group rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl",
+                    "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_55px_rgba(168,85,247,0.12)]",
+                    "hover:border-white/15 hover:bg-white/7 transition",
+                    disabled && "opacity-70"
+                  )}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-black text-white truncate">
+                          {s?.name || "Service"}
+                        </div>
+                        {!enabled ? <Badge tone="red">Disabled</Badge> : null}
+                      </div>
 
-            return (
-              <div
-                key={id}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {s?.platform ? <Pill>{s.platform}</Pill> : null}
+                        {s?.type ? <Pill>{s.type}</Pill> : null}
+                        {s?.category ? <Pill>{s.category}</Pill> : null}
+                        <Pill tone={enabled ? "ok" : "bad"}>per 1k</Pill>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 text-right">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">
+                        Price / 1k
+                      </div>
+                      <div className="mt-1 text-xl font-black tracking-tight text-white">
+                        {fmtMoney(price, cur)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {s?.min != null || s?.max != null ? (
+                    <div className="mt-3 text-xs text-zinc-200/70">
+                      Min:{" "}
+                      <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span>{" "}
+                      • Max:{" "}
+                      <span className="text-white/90 font-semibold">{s?.max ?? "—"}</span>
+                    </div>
+                  ) : null}
+
+                  {s?.description ? (
+                    <p className="mt-3 text-sm text-zinc-200/75 leading-relaxed line-clamp-3">
+                      {s.description}
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-sm text-zinc-200/60 leading-relaxed">
+                      Premium catalog item. Open details for full specs.
+                    </p>
+                  )}
+
+                  <div className="mt-4 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => openDetails(s)}
+                      className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-black/20 hover:bg-black/30 hover:border-white/20 transition"
+                    >
+                      Details
+                    </button>
+
+                    <button
+                      disabled={!id}
+                      onClick={() => onBuy(id)}
+                      className={cls(
+                        "rounded-2xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]",
+                        !authed
+                          ? "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90 hover:border-white/20"
+                          : "bg-white text-zinc-900 hover:bg-zinc-200",
+                        !id && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      {!authed ? "Login to buy" : "Buy"}
+                    </button>
+                  </div>
+
+                  <div className="pointer-events-none mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent opacity-0 group-hover:opacity-100 transition" />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ✅ LOAD MORE */}
+          {hasMore ? (
+            <div className="mt-6 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((v) => Math.min(filtered.length, v + STEP))}
                 className={cls(
-                  "group rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl",
-                  "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_55px_rgba(168,85,247,0.12)]",
-                  "hover:border-white/15 hover:bg-white/7 transition",
-                  disabled && "opacity-70"
+                  "rounded-2xl px-6 py-3 text-sm font-semibold",
+                  "border border-white/10 bg-white/5 text-white/90",
+                  "hover:bg-white/10 hover:border-white/20 transition",
+                  "active:scale-[0.99]"
                 )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm font-black text-white truncate">
-                        {s?.name || "Service"}
-                      </div>
-                      {!enabled ? (
-                        <Badge tone="red" title="Disabled (admin)">
-                          Disabled
-                        </Badge>
-                      ) : null}
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {s?.platform ? <Pill>{s.platform}</Pill> : null}
-                      {s?.type ? <Pill>{s.type}</Pill> : null}
-                      {s?.category ? <Pill>{s.category}</Pill> : null}
-                      <Pill tone={tone} title="Pricing model">
-                        per 1k
-                      </Pill>
-                    </div>
-                  </div>
-
-                  <div className="shrink-0 text-right">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">
-                      Price / 1k
-                    </div>
-                    <div className="mt-1 text-xl font-black tracking-tight text-white">
-                      {fmtMoney(price, cur)}
-                    </div>
-                  </div>
-                </div>
-
-                {s?.min != null || s?.max != null ? (
-                  <div className="mt-3 text-xs text-zinc-200/70">
-                    Min: <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span> • Max:{" "}
-                    <span className="text-white/90 font-semibold">{s?.max ?? "—"}</span>
-                  </div>
-                ) : null}
-
-                {s?.description ? (
-                  <p className="mt-3 text-sm text-zinc-200/75 leading-relaxed line-clamp-3">
-                    {s.description}
-                  </p>
-                ) : (
-                  <p className="mt-3 text-sm text-zinc-200/60 leading-relaxed">
-                    Premium catalog item. Open details for full specs.
-                  </p>
-                )}
-
-                <div className="mt-4 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => openDetails(s)}
-                    className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-black/20 hover:bg-black/30 hover:border-white/20 transition"
-                  >
-                    Details
-                  </button>
-
-                  <button
-                    disabled={!id}
-                    onClick={() => onBuy(id)}
-                    className={cls(
-                      "rounded-2xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]",
-                      !authed
-                        ? "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90 hover:border-white/20"
-                        : "bg-white text-zinc-900 hover:bg-zinc-200",
-                      !id && "opacity-50 cursor-not-allowed"
-                    )}
-                  >
-                    {!authed ? "Login to buy" : "Buy"}
-                  </button>
-                </div>
-
-                <div className="pointer-events-none mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent opacity-0 group-hover:opacity-100 transition" />
-              </div>
-            );
-          })}
-        </div>
+                Load more ({shown.length}/{filtered.length})
+              </button>
+            </div>
+          ) : (
+            <div className="mt-6 text-center text-xs text-zinc-300/70">
+              End of catalog • {filtered.length} items
+            </div>
+          )}
+        </>
       )}
 
       {/* MODAL */}
@@ -771,12 +804,11 @@ export default function ServicesPublic() {
         }}
       />
 
-      {/* FOOT NOTE */}
       <div className="mt-8 rounded-3xl border border-white/10 bg-black/25 p-6 text-sm text-zinc-200/70 backdrop-blur-xl shadow-soft">
         <div className="text-white font-semibold">Ordering flow</div>
         <div className="mt-2">
-          Guests can browse the catalog. To order you need an account (sign in), then you’ll be redirected to
-          create-order with the service pre-selected.
+          Guests can browse. To order you need an account (sign in), then you’ll be redirected to create-order with the
+          service pre-selected.
         </div>
       </div>
     </div>
