@@ -1,3 +1,4 @@
+// client/src/layouts/AppLayout.jsx
 import React, { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar, { SidebarDrawer } from "../components/Sidebar.jsx";
@@ -24,9 +25,10 @@ export default function AppLayout() {
     if (body.dataset) body.dataset.scrollY = "";
   }, []);
 
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [loc.pathname]);
+  useEffect(() => setMobileOpen(false), [loc.pathname]);
+
+  // Topbar visina (stable)
+  const TOPBAR_H = 64; // ako ti je topbar veci/manji, promeni (npr 72)
 
   return (
     <div className="min-h-[100dvh] w-full overflow-x-clip bg-zinc-950 text-zinc-100">
@@ -55,17 +57,19 @@ export default function AppLayout() {
 
         {/* MAIN */}
         <div className="relative flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-x-clip">
-          {/* IMPORTANT: give Topbar a stable measuring hook */}
-          <div id="app-topbar" className="sticky top-0 z-40">
+          {/* FIXED TOPBAR */}
+          <div
+            id="app-topbar"
+            data-topbar="app"
+            className="fixed left-0 right-0 top-0 z-40 md:left-[var(--sidebar-w,0px)]"
+          >
             <Topbar onOpenSidebar={() => setMobileOpen(true)} />
           </div>
 
-          {/* FULL-BLEED content area (no max-w here!) */}
-          <div className="min-w-0 flex-1 overflow-x-clip">
-            {/* Page controls can be full-bleed now */}
+          {/* content offset from fixed topbar */}
+          <div style={{ paddingTop: TOPBAR_H }} className="min-w-0 flex-1 overflow-x-clip">
             <div className="w-full">
-              {/* Provide a centered container helper for pages that want it */}
-              <div className="mx-auto w-full max-w-[1200px] 2xl:max-w-[1400px] px-4 py-4 md:px-6 md:py-6 pb-[calc(env(safe-area-inset-bottom)+24px)]">
+              <div className="mx-auto w-full max-w-[1200px] 2xl:max-w-[1400px] px-4 md:px-6 py-4 md:py-6 pb-[calc(env(safe-area-inset-bottom)+24px)]">
                 <Outlet />
               </div>
             </div>
