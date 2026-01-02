@@ -1,7 +1,7 @@
 // client/src/pages/Services.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api.js";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Search,
   X,
@@ -24,6 +24,7 @@ import {
   ArrowUpDown,
   CheckCircle2,
   AlertCircle,
+  Filter,
 } from "lucide-react";
 
 /* ------------------------------ labels ------------------------------ */
@@ -69,11 +70,27 @@ function money2(n) {
 }
 
 async function copyText(s) {
+  const text = String(s ?? "");
   try {
-    await navigator.clipboard.writeText(String(s ?? ""));
+    await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    return false;
+    // fallback
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -129,6 +146,7 @@ function Segmented({ value, onChange }) {
   return (
     <div className="inline-flex overflow-hidden rounded-2xl border border-white/10 bg-white/5">
       <button
+        type="button"
         onClick={() => onChange("grid")}
         className={cn(
           "inline-flex items-center gap-2 px-3 py-2 text-xs transition",
@@ -138,6 +156,7 @@ function Segmented({ value, onChange }) {
         <Grid2X2 className="h-4 w-4" /> Grid
       </button>
       <button
+        type="button"
         onClick={() => onChange("list")}
         className={cn(
           "inline-flex items-center gap-2 px-3 py-2 text-xs transition",
@@ -151,33 +170,37 @@ function Segmented({ value, onChange }) {
 }
 
 function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
+  const vMin = Math.min(valueMin, valueMax);
+  const vMax = Math.max(valueMin, valueMax);
+
   return (
     <div className="flex items-center gap-2">
-      <div className="text-xs text-zinc-200/70 w-10">{money2(valueMin)}€</div>
+      <div className="text-xs text-zinc-200/70 w-12">{money2(vMin)}€</div>
+
       <input
         type="range"
         min={min}
         max={max}
-        value={valueMin}
-        onChange={(e) => onChange({ min: Number(e.target.value), max: valueMax })}
+        value={vMin}
+        onChange={(e) => onChange({ min: Number(e.target.value), max: vMax })}
         className="w-28"
       />
       <input
         type="range"
         min={min}
         max={max}
-        value={valueMax}
-        onChange={(e) => onChange({ min: valueMin, max: Number(e.target.value) })}
+        value={vMax}
+        onChange={(e) => onChange({ min: vMin, max: Number(e.target.value) })}
         className="w-28"
       />
-      <div className="text-xs text-zinc-200/70 w-10 text-right">{money2(valueMax)}€</div>
+
+      <div className="text-xs text-zinc-200/70 w-12 text-right">{money2(vMax)}€</div>
     </div>
   );
 }
 
-/* ------------------------------ data normalize (FIXED) ------------------------------ */
+/* ------------------------------ data normalize ------------------------------ */
 
-// heuristika: iz category izvući platform label ako backend ne daje "platform"
 function inferPlatformFromCategory(cat) {
   const c = toLc(cat);
   if (!c) return "Other";
@@ -195,56 +218,39 @@ function inferPlatformFromCategory(cat) {
 }
 
 function normalizeService(s) {
-  // id: seed format (_id) OR provider format (service) OR generic (id)
   const externalId =
     s?.externalServiceId ??
     s?.providerServiceId ??
-    s?.service ?? // provider standard
+    s?.service ??
     s?.service_id ??
     s?.id ??
     null;
 
-  const id =
-    s?._id ||
-    s?.id ||
-    (externalId != null ? String(externalId) : "");
+  const id = s?._id || s?.id || (externalId != null ? String(externalId) : "");
 
-  // rate/min/max variants
-  const rateRaw =
-    s?.pricePer1000 ??
-    s?.rate ??
-    s?.price ??
-    s?.price_per_1000 ??
-    0;
-
+  const rateRaw = s?.pricePer1000 ?? s?.rate ?? s?.price ?? s?.price_per_1000 ?? 0;
   const minRaw = s?.min ?? s?.minOrder ?? s?.min_order ?? 0;
   const maxRaw = s?.max ?? s?.maxOrder ?? s?.max_order ?? 0;
 
-  // category/name variants
   const category = (s?.category || s?.type || "Other").toString().trim() || "Other";
-  const name = s?.name || s?.title || `Service ${String(externalId ?? id).slice(-6)}` || "—";
+  const name =
+    s?.name || s?.title || `Service ${String(externalId ?? id).slice(-6)}` || "—";
 
-  // platform:
-  // 1) explicit s.platform (seed)
-  // 2) infer from category (provider)
-  // 3) fallback Other
-  const platform =
-    s?.platform ? platformToLabel(s.platform) : inferPlatformFromCategory(category);
+  const platform = s?.platform ? platformToLabel(s.platform) : inferPlatformFromCategory(category);
 
   return {
     ...s,
-    _id: String(id || ""), // always string id for React keys
+    _id: String(id || ""),
     name,
     description: s?.description || "",
     category,
     platform,
     type: s?.type || "other",
-    rate: safeNum(rateRaw, 0), // €/1000
+    rate: safeNum(rateRaw, 0),
     min: safeNum(minRaw, 0),
     max: safeNum(maxRaw, 0),
     enabled: s?.enabled !== false,
 
-    // provider connection:
     externalServiceId: externalId,
     provider: s?.provider || "default",
   };
@@ -269,7 +275,9 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <div className="text-xl font-black tracking-tight text-white">{s.name || "Service"}</div>
+                <div className="text-xl font-black tracking-tight text-white">
+                  {s.name || "Service"}
+                </div>
                 <Badge tone="violet">{s.platform || "Other"}</Badge>
               </div>
 
@@ -278,6 +286,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                 <Badge tone="amber">{money2(s.rate)}€ / 1000</Badge>
                 <Badge>min {s.min || "—"}</Badge>
                 <Badge>max {s.max || "—"}</Badge>
+
                 <Badge tone={connected ? "emerald" : "red"}>
                   {connected ? (
                     <>
@@ -291,6 +300,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                 </Badge>
 
                 <button
+                  type="button"
                   onClick={() => toggleFav(s._id)}
                   className={cn(
                     "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition",
@@ -298,7 +308,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                       ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
                       : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
                   )}
-                  title={isFav ? "Unfavorite" : "Favorite"}
+                  title={isFav ? "Unpin" : "Pin"}
                 >
                   {isFav ? <Star className="h-3.5 w-3.5" /> : <StarOff className="h-3.5 w-3.5" />}
                   {isFav ? "Pinned" : "Pin"}
@@ -317,6 +327,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
             </div>
 
             <button
+              type="button"
               onClick={onClose}
               className="rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10"
             >
@@ -330,11 +341,13 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
               <div className="mt-1 text-lg font-black text-white">{money2(s.rate)}€</div>
               <div className="text-xs text-zinc-200/60">per 1000</div>
             </div>
+
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-zinc-200/60">Limits</div>
               <div className="mt-1 text-lg font-black text-white">{fmtRange(s.min, s.max)}</div>
               <div className="text-xs text-zinc-200/60">min / max</div>
             </div>
+
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="text-xs text-zinc-200/60">Health</div>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -363,6 +376,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
 
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <button
+              type="button"
               onClick={async () => {
                 const ok = await copyText(s._id);
                 toast(ok ? "Copied serviceId ✅" : "Copy failed ❌");
@@ -375,6 +389,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
             </button>
 
             <button
+              type="button"
               onClick={async () => {
                 const ok = await copyText(String(s.externalServiceId || ""));
                 toast(ok ? "Copied provider id ✅" : "Copy failed ❌");
@@ -394,6 +409,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
             </button>
 
             <button
+              type="button"
               onClick={() => onBuy(s)}
               className="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-black hover:bg-amber-400"
             >
@@ -433,19 +449,30 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
             <div className="mt-1 line-clamp-1 text-sm text-zinc-200/70">{s.description || "—"}</div>
 
             <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-200/70">
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">{money2(s.rate)}€ / 1000</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">min {s.min || "—"}</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">max {s.max || "—"}</span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">id …{String(s._id).slice(-6)}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                {money2(s.rate)}€ / 1000
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                min {s.min || "—"}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                max {s.max || "—"}
+              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                id …{String(s._id).slice(-6)}
+              </span>
             </div>
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             <button
+              type="button"
               onClick={() => toggleFav(s._id)}
               className={cn(
                 "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs transition",
-                isFav ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                isFav
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                  : "border-white/10 bg-white/5 text-white hover:bg-white/10"
               )}
               title={isFav ? "Unpin" : "Pin"}
             >
@@ -454,6 +481,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
             </button>
 
             <button
+              type="button"
               onClick={async () => {
                 const ok = await copyText(s._id);
                 toast(ok ? "Copied ✅" : "Copy failed ❌");
@@ -464,6 +492,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
             </button>
 
             <button
+              type="button"
               onClick={() => onDetails(s)}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white hover:bg-white/10"
             >
@@ -471,6 +500,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
             </button>
 
             <button
+              type="button"
               onClick={() => onBuy(s)}
               className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-3 py-2 text-xs font-semibold text-black hover:bg-amber-400"
             >
@@ -530,10 +560,13 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
 
         <div className="flex items-center gap-2">
           <button
+            type="button"
             onClick={() => toggleFav(s._id)}
             className={cn(
               "rounded-2xl border p-2 transition",
-              isFav ? "border-amber-500/30 bg-amber-500/10 text-amber-100" : "border-white/10 bg-white/5 text-white hover:bg-white/10"
+              isFav
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                : "border-white/10 bg-white/5 text-white hover:bg-white/10"
             )}
             title={isFav ? "Unpin" : "Pin"}
           >
@@ -541,6 +574,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
           </button>
 
           <button
+            type="button"
             onClick={async () => {
               const ok = await copyText(s._id);
               toast(ok ? "Copied ✅" : "Copy failed ❌");
@@ -552,6 +586,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
           </button>
 
           <button
+            type="button"
             onClick={() => onDetails(s)}
             className="rounded-2xl border border-white/10 bg-white/5 p-2 text-white hover:bg-white/10"
             title="Details"
@@ -560,6 +595,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
           </button>
 
           <button
+            type="button"
             onClick={() => onBuy(s)}
             className="rounded-2xl bg-amber-500 p-2 text-black hover:bg-amber-400"
             title="Buy"
@@ -600,6 +636,11 @@ function saveFavs(set) {
 
 export default function Services() {
   const nav = useNavigate();
+  const loc = useLocation();
+
+  // ✅ base path: radi i na /services i na /app/services
+  const base = loc.pathname.startsWith("/app") ? "/app" : "";
+  const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -614,6 +655,7 @@ export default function Services() {
   const [onlyConnected, setOnlyConnected] = useState(false);
 
   const [price, setPrice] = useState({ min: 0, max: 50 });
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeService, setActiveService] = useState(null);
@@ -643,7 +685,7 @@ export default function Services() {
   function showToast(msg) {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 1200);
+    toastTimer.current = setTimeout(() => setToast(""), 1400);
   }
 
   function toggleFav(id) {
@@ -663,15 +705,16 @@ export default function Services() {
       setLoading(true);
       setErr("");
       try {
-        const res = await api.servicesPublic(); // enabled only OR provider list
+        const res = await api.servicesPublic(); // public-safe endpoint
         const list = Array.isArray(res) ? res : res?.services || [];
-        const norm = list.map(normalizeService).filter((x) => x._id); // drop invalid
+        const norm = list.map(normalizeService).filter((x) => x._id && x.enabled !== false);
         if (mounted) setItems(norm);
 
         // auto-set platform if current selected has 0
         if (mounted) {
           const counts = new Map(platforms.map((p) => [p, 0]));
           for (const s of norm) counts.set(s.platform || "Other", (counts.get(s.platform || "Other") || 0) + 1);
+
           if ((counts.get(platform) || 0) === 0) {
             const first = platforms.find((p) => (counts.get(p) || 0) > 0) || "Other";
             setPlatform(first);
@@ -790,7 +833,6 @@ export default function Services() {
         }
 
         if (a.rate !== b.rate) return a.rate - b.rate;
-        if (a.name.length !== b.name.length) return a.name.length - b.name.length;
         return a.name.localeCompare(b.name);
       });
     }
@@ -813,7 +855,7 @@ export default function Services() {
   }, [filtered, page, pageSize]);
 
   function buyNow(s) {
-    nav(`/create-order?serviceId=${encodeURIComponent(s._id)}`);
+    nav(to(`/create-order?serviceId=${encodeURIComponent(s._id)}`));
   }
 
   function openDetails(s) {
@@ -834,6 +876,7 @@ export default function Services() {
 
   return (
     <div className="space-y-4">
+      {/* masonry css */}
       <style>{`
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
@@ -841,12 +884,14 @@ export default function Services() {
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
       `}</style>
 
+      {/* toast */}
       {toast ? (
-        <div className="fixed right-6 top-6 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
+        <div className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
           {toast}
         </div>
       ) : null}
 
+      {/* header */}
       <GlassCard className="p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
@@ -862,7 +907,7 @@ export default function Services() {
             </div>
 
             <div className="mt-2 text-sm text-zinc-200/70">
-              Choose platform → filter → pin favorites → instant buy. This is the “million euro” panel feel.
+              Choose platform → filter → pin favorites → instant buy. Clean, fast, public-safe.
             </div>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -901,23 +946,27 @@ export default function Services() {
             </div>
           </div>
 
+          {/* ✅ no <a href> (no reload), respects /app */}
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <a
-              href="/create-order"
+            <button
+              type="button"
+              onClick={() => nav(to("/create-order"))}
               className="inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-400"
             >
               <ShoppingCart className="h-4 w-4" /> Create order
-            </a>
-            <a
-              href="/wallet"
+            </button>
+            <button
+              type="button"
+              onClick={() => nav(to("/wallet"))}
               className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-100 hover:bg-white/10"
             >
               <Sparkles className="h-4 w-4" /> Wallet
-            </a>
+            </button>
           </div>
         </div>
       </GlassCard>
 
+      {/* platform chips */}
       <GlassCard className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           {platforms.map((p) => {
@@ -928,6 +977,7 @@ export default function Services() {
             return (
               <button
                 key={p}
+                type="button"
                 onClick={() => setPlatform(p)}
                 className={cn(
                   "flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm transition",
@@ -950,7 +1000,8 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      <div className="sticky top-0 z-10">
+      {/* ✅ sticky controls (offset a bit so it doesn't fight topbar) */}
+      <div className="sticky top-3 z-10">
         <GlassCard className="p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
@@ -964,6 +1015,7 @@ export default function Services() {
                 />
                 {q ? (
                   <button
+                    type="button"
                     onClick={() => setQ("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
                     title="Clear"
@@ -977,6 +1029,15 @@ export default function Services() {
                 <span className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
                   <SlidersHorizontal className="h-4 w-4" /> Control
                 </span>
+
+                {/* ✅ mobile filters toggle */}
+                <button
+                  type="button"
+                  onClick={() => setMobileFiltersOpen((v) => !v)}
+                  className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                >
+                  <Filter className="h-4 w-4" /> Filters
+                </button>
 
                 <select
                   className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
@@ -1010,6 +1071,7 @@ export default function Services() {
                 </select>
 
                 <button
+                  type="button"
                   onClick={() => setOnlyConnected((x) => !x)}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm transition",
@@ -1023,6 +1085,7 @@ export default function Services() {
                   Connected
                 </button>
 
+                {/* desktop price range */}
                 <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
                   <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                   <Range
@@ -1039,6 +1102,7 @@ export default function Services() {
                 </div>
 
                 <button
+                  type="button"
                   onClick={resetFilters}
                   className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
                   title="Reset filters"
@@ -1064,9 +1128,42 @@ export default function Services() {
               </Badge>
             </div>
           </div>
+
+          {/* ✅ mobile filters panel */}
+          {mobileFiltersOpen ? (
+            <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-white">Price range</div>
+                <button
+                  type="button"
+                  onClick={() => setMobileFiltersOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
+                <Range
+                  min={0}
+                  max={Math.max(10, price.max)}
+                  valueMin={Math.min(price.min, price.max)}
+                  valueMax={Math.max(price.min, price.max)}
+                  onChange={(v) => {
+                    const mn = Math.max(0, Math.min(v.min, v.max));
+                    const mx = Math.max(mn, Math.max(v.min, v.max));
+                    setPrice({ min: mn, max: mx });
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
         </GlassCard>
       </div>
 
+      {/* pinned */}
       {pinned.length ? (
         <GlassCard className="p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -1077,6 +1174,7 @@ export default function Services() {
               <div className="text-sm text-zinc-200/70">Your “fast-buy” set (stored in browser).</div>
             </div>
             <button
+              type="button"
               onClick={() => {
                 setFavs(() => {
                   const empty = new Set();
@@ -1109,6 +1207,7 @@ export default function Services() {
         </GlassCard>
       ) : null}
 
+      {/* list */}
       {loading ? (
         <div className={cn(view === "list" ? "space-y-3" : "masonry")}>
           {Array.from({ length: 12 }).map((_, i) => (
@@ -1118,7 +1217,9 @@ export default function Services() {
           ))}
         </div>
       ) : err ? (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">{err}</div>
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
+          {err}
+        </div>
       ) : filtered.length === 0 ? (
         <GlassCard className="p-6">
           <div className="text-white font-semibold">No services found</div>
@@ -1126,6 +1227,7 @@ export default function Services() {
             Try changing platform/category, price range or clearing search.
           </div>
           <button
+            type="button"
             onClick={resetFilters}
             className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-amber-500 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-400"
           >
@@ -1174,6 +1276,7 @@ export default function Services() {
 
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 className={cn(
@@ -1187,6 +1290,7 @@ export default function Services() {
               </button>
 
               <button
+                type="button"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 className={cn(
