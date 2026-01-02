@@ -11,7 +11,6 @@ import {
   StarOff,
   Copy,
   Info,
-  ShoppingCart,
   AlertCircle,
   CheckCircle2,
   ChevronRight,
@@ -51,21 +50,14 @@ function safeNum(n, fallback = 0) {
   return Number.isFinite(x) ? x : fallback;
 }
 
-/**
- * OLD: money2() ubija sve ispod 0.01 na "0.00"
- * Zadržavamo ga samo za "normal" UI stvari ako hoćeš,
- * ali za pricing (rate/total) koristimo SMART format.
- */
 function money2(n) {
   return (Math.round(safeNum(n, 0) * 100) / 100).toFixed(2);
 }
 
-/** ✅ SMART money — pokazuje male vrednosti (0.004200 EUR), ne 0.00 */
 function fmtMoneySmart(value, currency = "EUR") {
   const v = safeNum(value, 0);
   const abs = Math.abs(v);
 
-  // dynamic decimals: tiny -> more decimals so it never looks like zero
   const decimals =
     abs === 0 ? 2 :
     abs < 0.01 ? 6 :
@@ -83,7 +75,6 @@ function fmtMoneySmart(value, currency = "EUR") {
   }
 }
 
-/** ✅ SMART rate (€/1000) — isto dynamic decimals */
 function fmtRatePer1000(rate) {
   const r = safeNum(rate, 0);
   const abs = Math.abs(r);
@@ -251,7 +242,7 @@ const PRESETS = [
 ];
 
 /* =========================
-   Service Picker Modal
+   Service Picker Modal (iOS SAFE)
 ========================= */
 
 function ServicePickerModal({
@@ -268,8 +259,11 @@ function ServicePickerModal({
   showToast,
   selectedId,
 }) {
-  const boxRef = useRef(null);
-  const listRef = useRef(null);
+  const focusRef = useRef(null);
+  const panelRef = useRef(null);     // ✅ scroll container for whole modal (iOS)
+  const listRef = useRef(null);      // list scroll (desktop)
+  const lastActiveElRef = useRef(null);
+
   const [cursor, setCursor] = useState(0);
 
   const rows = useMemo(() => {
@@ -314,12 +308,45 @@ function ServicePickerModal({
 
   useEffect(() => setCursor(0), [q, onlyConnected, open]);
 
+  // ✅ BODY SCROLL LOCK + restore focus (safe modal behavior)
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => boxRef.current?.focus?.(), 20);
+
+    lastActiveElRef.current = document.activeElement;
+
+    const prevOverflow = document.body.style.overflow;
+    const prevOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.overscrollBehavior = prevOverscroll;
+      // restore focus
+      try {
+        lastActiveElRef.current?.focus?.();
+      } catch {}
+    };
+  }, [open]);
+
+  // ✅ Focus initial
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => focusRef.current?.focus?.(), 30);
     return () => clearTimeout(t);
   }, [open]);
 
+  // ✅ iOS: always reset modal scroll to top so header is visible
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => {
+      panelRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
+      // also list to top for consistency
+      listRef.current && (listRef.current.scrollTop = 0);
+    });
+  }, [open, q, onlyConnected]);
+
+  // ✅ Keyboard navigation
   useEffect(() => {
     if (!open) return;
 
@@ -347,10 +374,11 @@ function ServicePickerModal({
       }
     }
 
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { passive: false });
     return () => window.removeEventListener("keydown", onKey);
   }, [open, rows, cursor, onClose, onPick]);
 
+  // ✅ keep active row in view (list scroll only)
   useEffect(() => {
     if (!open) return;
     const wrap = listRef.current;
@@ -370,259 +398,282 @@ function ServicePickerModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm p-4 flex items-center justify-center">
-      <div className="w-full max-w-5xl">
-        <GlassCard className="p-0">
-          <div ref={boxRef} tabIndex={-1} className="outline-none">
-            <div className="p-5 border-b border-white/10">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="text-xl font-black tracking-tight text-white">Pick a service</div>
-                    <Badge tone="violet">
-                      <Sparkles className="h-3.5 w-3.5" /> 2050 Picker
-                    </Badge>
-                    <Badge tone={onlyConnected ? "emerald" : "zinc"}>
-                      <BadgeCheck className="h-3.5 w-3.5" /> {onlyConnected ? "Only connected" : "All"}
-                    </Badge>
-                    <Badge tone="blue">
-                      <ShieldCheck className="h-3.5 w-3.5" /> Arrow keys + Enter
-                    </Badge>
-                  </div>
-                  <div className="mt-1 text-sm text-zinc-200/70">
-                    Search → pin favorites → choose. Nema više belog dropdowna.
-                  </div>
-                </div>
+    <div
+      className="fixed inset-0 z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Service picker"
+    >
+      {/* backdrop */}
+      <button
+        type="button"
+        aria-label="Close"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+      />
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setOnlyConnected((x) => !x)}
-                    className={cn(
-                      "rounded-2xl border px-3 py-2 text-sm transition",
-                      onlyConnected
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                        : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
-                    )}
-                  >
-                    {onlyConnected ? "Only connected" : "All services"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div className="relative w-full md:w-[520px]">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                  <input
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder="Search services… followers, likes, views…"
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
-                  />
-                  {q ? (
-                    <button
-                      type="button"
-                      onClick={() => setQ("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
-                      title="Clear"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {PRESETS.map((p) => (
-                    <button
-                      type="button"
-                      key={p.label}
-                      onClick={() => {
-                        setQ(p.query);
-                        showToast(`Preset: ${p.label}`);
-                      }}
-                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100 hover:bg-white/10"
-                      title={p.hint}
-                    >
-                      <Sparkles className="h-3.5 w-3.5 inline-block mr-1" />
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5">
-              <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-                <div className="min-w-0">
-                  <div className="mb-2 flex items-center justify-between">
-                    <div className="text-xs text-zinc-200/60">
-                      Showing <span className="text-zinc-100 font-semibold">{rows.length}</span>
+      {/* ✅ scroll layer (THIS fixes iOS “can’t scroll to top”) */}
+      <div className="absolute inset-0 flex items-start justify-center p-3 sm:p-4">
+        <div
+          ref={panelRef}
+          className={cn(
+            "w-full max-w-5xl",
+            "max-h-[88dvh] overflow-y-auto",
+            "rounded-2xl",
+            "[-webkit-overflow-scrolling:touch]",
+            "overscroll-contain touch-pan-y"
+          )}
+        >
+          <GlassCard className="p-0">
+            <div ref={focusRef} tabIndex={-1} className="outline-none">
+              <div className="p-5 border-b border-white/10">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-xl font-black tracking-tight text-white">Pick a service</div>
+                      <Badge tone="violet">
+                        <Sparkles className="h-3.5 w-3.5" /> 2050 Picker
+                      </Badge>
+                      <Badge tone={onlyConnected ? "emerald" : "zinc"}>
+                        <BadgeCheck className="h-3.5 w-3.5" /> {onlyConnected ? "Only connected" : "All"}
+                      </Badge>
+                      <Badge tone="blue">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Arrow keys + Enter
+                      </Badge>
                     </div>
-                    <div className="text-xs text-zinc-200/60">
-                      Tip: <span className="text-zinc-100">Enter</span> = select •{" "}
-                      <span className="text-zinc-100">Esc</span> = close
+                    <div className="mt-1 text-sm text-zinc-200/70">
+                      Search → pin favorites → choose. Nema više belog dropdowna.
                     </div>
                   </div>
 
-                  <div
-                    ref={listRef}
-                    className="max-h-[56vh] overflow-auto rounded-2xl border border-white/10 bg-white/5"
-                  >
-                    {rows.length === 0 ? (
-                      <div className="p-4 text-sm text-zinc-200/70">
-                        No services found. Try different search or disable “Only connected”.
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOnlyConnected((x) => !x)}
+                      className={cn(
+                        "rounded-2xl border px-3 py-2 text-sm transition",
+                        onlyConnected
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                          : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
+                      )}
+                    >
+                      {onlyConnected ? "Only connected" : "All services"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 hover:bg-white/10"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="relative w-full md:w-[520px]">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
+                    <input
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      placeholder="Search services… followers, likes, views…"
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
+                    />
+                    {q ? (
+                      <button
+                        type="button"
+                        onClick={() => setQ("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                        title="Clear"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {PRESETS.map((p) => (
+                      <button
+                        type="button"
+                        key={p.label}
+                        onClick={() => {
+                          setQ(p.query);
+                          showToast(`Preset: ${p.label}`);
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100 hover:bg-white/10"
+                        title={p.hint}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 inline-block mr-1" />
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5">
+                <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+                  <div className="min-w-0">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-xs text-zinc-200/60">
+                        Showing <span className="text-zinc-100 font-semibold">{rows.length}</span>
                       </div>
-                    ) : (
-                      <div className="divide-y divide-white/10">
-                        {rows.map((r, idx) => {
-                          const s = r.s;
-                          const pinned = favs.has(r.id);
-                          const active = idx === cursor;
-                          const picked = String(selectedId || "") === r.id;
+                      <div className="text-xs text-zinc-200/60">
+                        Tip: <span className="text-zinc-100">Enter</span> = select •{" "}
+                        <span className="text-zinc-100">Esc</span> = close
+                      </div>
+                    </div>
 
-                          return (
-                            <div
-                              key={r.id}
-                              data-idx={idx}
-                              className={cn(
-                                "p-3 transition cursor-pointer",
-                                active ? "bg-white/10" : "hover:bg-white/10"
-                              )}
-                              onMouseEnter={() => setCursor(idx)}
-                              onClick={() => onPick(s)}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Badge tone="violet">{s.platform ? cap(s.platform) : "Other"}</Badge>
-                                    <Badge tone="blue">{s.category || "Other"}</Badge>
+                    <div
+                      ref={listRef}
+                      className="max-h-[56vh] overflow-auto rounded-2xl border border-white/10 bg-white/5 overscroll-contain [-webkit-overflow-scrolling:touch]"
+                    >
+                      {rows.length === 0 ? (
+                        <div className="p-4 text-sm text-zinc-200/70">
+                          No services found. Try different search or disable “Only connected”.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-white/10">
+                          {rows.map((r, idx) => {
+                            const s = r.s;
+                            const pinned = favs.has(r.id);
+                            const active = idx === cursor;
+                            const picked = String(selectedId || "") === r.id;
 
-                                    {/* ✅ FIX: rate prikaz ne sme money2 */}
-                                    <Badge tone="amber">{fmtRatePer1000(r.rate)}</Badge>
+                            return (
+                              <div
+                                key={r.id}
+                                data-idx={idx}
+                                className={cn(
+                                  "p-3 transition cursor-pointer",
+                                  active ? "bg-white/10" : "hover:bg-white/10"
+                                )}
+                                onMouseEnter={() => setCursor(idx)}
+                                onClick={() => onPick(s)}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge tone="violet">{s.platform ? cap(s.platform) : "Other"}</Badge>
+                                      <Badge tone="blue">{s.category || "Other"}</Badge>
+                                      <Badge tone="amber">{fmtRatePer1000(r.rate)}</Badge>
 
-                                    <Badge tone={r.connected ? "emerald" : "red"}>
-                                      {r.connected ? (
-                                        <>
-                                          <BadgeCheck className="h-3.5 w-3.5" /> Connected
-                                        </>
-                                      ) : (
-                                        <>
-                                          <LinkIcon className="h-3.5 w-3.5" /> Missing ID
-                                        </>
-                                      )}
-                                    </Badge>
-                                    {picked ? (
-                                      <Badge tone="emerald">
-                                        <CheckCircle2 className="h-3.5 w-3.5" /> Selected
+                                      <Badge tone={r.connected ? "emerald" : "red"}>
+                                        {r.connected ? (
+                                          <>
+                                            <BadgeCheck className="h-3.5 w-3.5" /> Connected
+                                          </>
+                                        ) : (
+                                          <>
+                                            <LinkIcon className="h-3.5 w-3.5" /> Missing ID
+                                          </>
+                                        )}
                                       </Badge>
-                                    ) : null}
+                                      {picked ? (
+                                        <Badge tone="emerald">
+                                          <CheckCircle2 className="h-3.5 w-3.5" /> Selected
+                                        </Badge>
+                                      ) : null}
+                                    </div>
+
+                                    <div className="mt-2 text-sm font-semibold text-white truncate">
+                                      {s.name || "—"}
+                                    </div>
+
+                                    <div className="mt-1 text-xs text-zinc-200/60 line-clamp-1">
+                                      {s.description || `min ${s.min ?? "—"} • max ${s.max ?? "—"}`}
+                                    </div>
+
+                                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-200/60">
+                                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                        min {s.min ?? "—"}
+                                      </span>
+                                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                        max {s.max ?? "—"}
+                                      </span>
+                                      <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
+                                        id …{String(r.id).slice(-6)}
+                                      </span>
+                                    </div>
                                   </div>
 
-                                  <div className="mt-2 text-sm font-semibold text-white truncate">
-                                    {s.name || "—"}
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleFav(r.id);
+                                        showToast(pinned ? "Unpinned" : "Pinned");
+                                      }}
+                                      className={cn(
+                                        "rounded-2xl border p-2 transition",
+                                        pinned
+                                          ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
+                                          : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
+                                      )}
+                                      title={pinned ? "Unpin" : "Pin"}
+                                    >
+                                      {pinned ? <Star className="h-4 w-4" /> : <StarOff className="h-4 w-4" />}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const ok = await copyText(r.id);
+                                        showToast(ok ? "Copied serviceId ✅" : "Copy failed ❌");
+                                      }}
+                                      className="rounded-2xl border border-white/10 bg-white/5 p-2 text-zinc-100 hover:bg-white/10"
+                                      title="Copy serviceId"
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onPick(s);
+                                      }}
+                                      className="rounded-2xl bg-amber-500 p-2 text-black hover:bg-amber-400"
+                                      title="Select"
+                                    >
+                                      <ArrowUpRight className="h-4 w-4" />
+                                    </button>
                                   </div>
-
-                                  <div className="mt-1 text-xs text-zinc-200/60 line-clamp-1">
-                                    {s.description || `min ${s.min ?? "—"} • max ${s.max ?? "—"}`}
-                                  </div>
-
-                                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-zinc-200/60">
-                                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
-                                      min {s.min ?? "—"}
-                                    </span>
-                                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
-                                      max {s.max ?? "—"}
-                                    </span>
-                                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
-                                      id …{String(r.id).slice(-6)}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <div className="flex shrink-0 items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleFav(r.id);
-                                      showToast(pinned ? "Unpinned" : "Pinned");
-                                    }}
-                                    className={cn(
-                                      "rounded-2xl border p-2 transition",
-                                      pinned
-                                        ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
-                                        : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
-                                    )}
-                                    title={pinned ? "Unpin" : "Pin"}
-                                  >
-                                    {pinned ? <Star className="h-4 w-4" /> : <StarOff className="h-4 w-4" />}
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      const ok = await copyText(r.id);
-                                      showToast(ok ? "Copied serviceId ✅" : "Copy failed ❌");
-                                    }}
-                                    className="rounded-2xl border border-white/10 bg-white/5 p-2 text-zinc-100 hover:bg-white/10"
-                                    title="Copy serviceId"
-                                  >
-                                    <Copy className="h-4 w-4" />
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onPick(s);
-                                    }}
-                                    className="rounded-2xl bg-amber-500 p-2 text-black hover:bg-amber-400"
-                                    title="Select"
-                                  >
-                                    <ArrowUpRight className="h-4 w-4" />
-                                  </button>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-3">
-                  <GlassCard className="p-4">
-                    <div className="text-sm font-semibold text-white">Why this is better</div>
-                    <div className="mt-2 text-xs text-zinc-200/60 leading-relaxed">
-                      Native <code className="text-zinc-100">select</code> na Windows-u gazi Tailwind i napravi
-                      “beli dropdown” preko cele stranice. Ovaj picker je <b className="text-zinc-100">100% premium</b>,
-                      theme-safe, search + pin + keyboard.
-                    </div>
-                  </GlassCard>
+                  <div className="space-y-3">
+                    <GlassCard className="p-4">
+                      <div className="text-sm font-semibold text-white">Why this is better</div>
+                      <div className="mt-2 text-xs text-zinc-200/60 leading-relaxed">
+                        Native <code className="text-zinc-100">select</code> na Windows-u gazi Tailwind i napravi
+                        “beli dropdown” preko cele stranice. Ovaj picker je{" "}
+                        <b className="text-zinc-100">100% premium</b>, theme-safe, search + pin + keyboard.
+                      </div>
+                    </GlassCard>
 
-                  <GlassCard className="p-4">
-                    <div className="text-sm font-semibold text-white">Pro tips</div>
-                    <div className="mt-2 text-xs text-zinc-200/60 space-y-1">
-                      <div>• Pinuj top servise (fav) → uvek gore.</div>
-                      <div>• “Only connected” = nema fail ordera zbog missing provider id.</div>
-                      <div>• Presets ubrzavaju filtriranje (“followers”, “views”…).</div>
-                    </div>
-                  </GlassCard>
+                    <GlassCard className="p-4">
+                      <div className="text-sm font-semibold text-white">Pro tips</div>
+                      <div className="mt-2 text-xs text-zinc-200/60 space-y-1">
+                        <div>• Pinuj top servise (fav) → uvek gore.</div>
+                        <div>• “Only connected” = nema fail ordera zbog missing provider id.</div>
+                        <div>• Presets ubrzavaju filtriranje (“followers”, “views”…).</div>
+                      </div>
+                    </GlassCard>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </GlassCard>
+          </GlassCard>
+        </div>
       </div>
     </div>
   );
@@ -658,7 +709,6 @@ export default function CreateOrder() {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const [favs, setFavs] = useState(() => loadSet(FAV_KEY));
-
   const [recentLinks, setRecentLinks] = useState(() => loadRecentLinks());
 
   const [wallet, setWallet] = useState({ loading: true, ok: false, balance: 0, currency: "EUR" });
@@ -823,7 +873,6 @@ export default function CreateOrder() {
     if (selected.max && qn > selected.max) return setError(`Quantity above max (${selected.max})`);
 
     if (wallet.ok && !canAfford) {
-      // ✅ FIX: show wallet with smart currency too (optional)
       return setError(`Insufficient wallet balance (${fmtMoneySmart(wallet.balance, currency)})`);
     }
 
@@ -911,7 +960,6 @@ export default function CreateOrder() {
                 </Badge>
               </div>
 
-              {/* ✅ FIX: wallet can stay money2, ali može i smart */}
               <div className="mt-2 text-xl font-black text-white">
                 {wallet.ok ? fmtMoneySmart(wallet.balance, currency) : "—"}
               </div>
@@ -1018,7 +1066,6 @@ export default function CreateOrder() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {/* ✅ FIX: rate prikaz */}
                       {selected ? <Badge tone="amber">{fmtRatePer1000(rate)}</Badge> : null}
                       <ChevronRight className="h-4 w-4 text-zinc-200/70" />
                     </div>
@@ -1031,8 +1078,6 @@ export default function CreateOrder() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-sm font-semibold text-white">{serviceLabel}</div>
-
-                          {/* ✅ FIX: rate prikaz */}
                           <Badge tone="amber">{fmtRatePer1000(rate)}</Badge>
 
                           <Badge tone={selectedConnected ? "emerald" : "red"}>
@@ -1281,7 +1326,6 @@ export default function CreateOrder() {
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge tone="blue">{selected?.category || "—"}</Badge>
                   <Badge tone="violet">{selected?.platform ? cap(selected.platform) : "—"}</Badge>
-                  {/* ✅ FIX */}
                   <Badge tone="amber">{fmtRatePer1000(rate)}</Badge>
                 </div>
               </div>
@@ -1308,14 +1352,9 @@ export default function CreateOrder() {
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-sm text-zinc-200/70">Estimated price</div>
-
-                  {/* ✅ BIG FIX: total ne sme money2 */}
-                  <div className="text-lg font-black text-white">
-                    {fmtMoneySmart(total, currency)}
-                  </div>
+                  <div className="text-lg font-black text-white">{fmtMoneySmart(total, currency)}</div>
                 </div>
 
-                {/* ✅ FIX: formula prikaz sa smart rate */}
                 <div className="mt-1 text-xs text-zinc-200/60">
                   (quantity / 1000) × rate ({fmtRatePer1000(rate)})
                 </div>
@@ -1323,8 +1362,6 @@ export default function CreateOrder() {
                 {wallet.ok ? (
                   <div className="mt-3 flex items-center justify-between text-xs">
                     <span className="text-zinc-200/60">Wallet after</span>
-
-                    {/* ✅ FIX: wallet after smart */}
                     <span className={cn(canAfford ? "text-emerald-200" : "text-red-200")}>
                       {fmtMoneySmart(wallet.balance - total, currency)}
                     </span>
