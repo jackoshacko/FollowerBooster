@@ -3,11 +3,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import CookieNotice from "../components/CookieNotice.jsx";
 import bgSmm from "../assets/backgroundsmm.jpg";
+import { api, getToken, clearAuthLocal, setToken, setUser, setRole } from "../lib/api.js";
 
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
+/** iOS-safe body lock (keeps scroll pos) */
 function useBodyScrollLock(locked) {
   useEffect(() => {
     if (!locked) return;
@@ -22,7 +24,6 @@ function useBodyScrollLock(locked) {
     const prevRight = body.style.right;
     const prevWidth = body.style.width;
 
-    // lock (prevents iOS bounce too)
     const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
     body.dataset.scrollY = String(scrollY);
 
@@ -35,7 +36,6 @@ function useBodyScrollLock(locked) {
     html.style.overscrollBehavior = "none";
 
     return () => {
-      // unlock
       const y = Number(body.dataset.scrollY || "0");
 
       body.style.overflow = prevOverflow;
@@ -52,10 +52,11 @@ function useBodyScrollLock(locked) {
   }, [locked]);
 }
 
-function NavBtn({ to, children }) {
+function NavBtn({ to, children, onClick }) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
         cls(
           "rounded-2xl px-3 py-2 text-sm font-semibold",
@@ -71,10 +72,11 @@ function NavBtn({ to, children }) {
   );
 }
 
-function PrimaryBtn({ to, children }) {
+function PrimaryBtn({ to, children, onClick }) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={cls(
         "rounded-2xl px-3 py-2 text-sm font-semibold",
         "bg-white text-zinc-900 hover:bg-zinc-200",
@@ -86,6 +88,20 @@ function PrimaryBtn({ to, children }) {
   );
 }
 
+function Chip({ children }) {
+  return (
+    <span
+      className={cls(
+        "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
+        "border border-white/10 bg-white/5 text-white/90 backdrop-blur-xl",
+        "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
 export default function PublicLayout() {
   const nav = useNavigate();
   const location = useLocation();
@@ -93,16 +109,18 @@ export default function PublicLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   useBodyScrollLock(mobileOpen);
 
-  // zatvori drawer kad promeniš rutu
+  const [me, setMe] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  // close drawer on route change
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
 
-  // reset ako je nekad ostao body lock (staro stanje)
+  // cleanup any stale body lock
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
-
     body.style.overflow = "";
     body.style.position = "";
     body.style.top = "";
@@ -110,9 +128,90 @@ export default function PublicLayout() {
     body.style.right = "";
     body.style.width = "";
     html.style.overscrollBehavior = "";
-
     if (body.dataset) body.dataset.scrollY = "";
   }, []);
+
+  // ✅ Auth-aware on PUBLIC: if token exists -> try /api/me
+  // IMPORTANT: if it fails with 401 here, DO NOT clear token (public pages must not "log you out")
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setChecking(true);
+      try {
+        const t = getToken();
+        if (!t) {
+          if (!alive) return;
+          setMe(null);
+          return;
+        }
+        const data = await api.get("/api/me");
+        if (!alive) return;
+        setMe(data || null);
+        if (data?.role) setRole(data.role);
+      } catch (e) {
+        // Keep it soft on public pages.
+        if (!alive) return;
+        setMe(null);
+      } finally {
+        if (!alive) return;
+        setChecking(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // update auth state if something changes (login/logout callback)
+  useEffect(() => {
+    let alive = true;
+    const onAuth = async () => {
+      try {
+        const t = getToken();
+        if (!t) {
+          if (!alive) return;
+          setMe(null);
+          return;
+        }
+        const data = await api.get("/api/me");
+        if (!alive) return;
+        setMe(data || null);
+        if (data?.role) setRole(data.role);
+      } catch {
+        if (!alive) return;
+        setMe(null);
+      }
+    };
+    window.addEventListener("auth-changed", onAuth);
+    return () => {
+      alive = false;
+      window.removeEventListener("auth-changed", onAuth);
+    };
+  }, []);
+
+  const authed = !!getToken() && !!me;
+  const userLabel = useMemo(() => me?.email || me?.username || me?.name || "", [me]);
+
+  function logout() {
+    // Public logout should be real logout
+    clearAuthLocal();
+    setToken("");
+    setUser(null);
+    setRole("");
+    setMe(null);
+    window.dispatchEvent(new Event("auth-changed"));
+    nav("/login", { replace: true });
+  }
+
+  // Optional: if user is authed and clicks "Services" on public, jump into /app/services
+  function goServices() {
+    if (authed) nav("/app/services");
+    else nav("/services");
+  }
+  function goHelp() {
+    nav("/faq");
+  }
 
   const isGlassBar = useMemo(
     () =>
@@ -141,7 +240,7 @@ export default function PublicLayout() {
           <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
         </div>
 
-        {/* ✅ SHELL: header fixed, only content scrolls */}
+        {/* SHELL */}
         <div className="relative z-10 h-full flex flex-col min-w-0">
           {/* TOPBAR */}
           <header className="shrink-0">
@@ -150,11 +249,12 @@ export default function PublicLayout() {
 
               <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
                 <div className="flex h-16 items-center justify-between min-w-0 gap-3">
-                  {/* LEFT: BRAND */}
+                  {/* BRAND */}
                   <button
                     onClick={() => nav("/")}
                     className="flex items-center gap-3 min-w-0"
                     title="Home"
+                    type="button"
                   >
                     <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
                       <span className="text-xs font-black tracking-tight text-white">FB</span>
@@ -170,26 +270,76 @@ export default function PublicLayout() {
                     </div>
                   </button>
 
-                  {/* RIGHT: DESKTOP NAV */}
+                  {/* DESKTOP NAV */}
                   <nav className="hidden md:flex items-center gap-2 shrink-0">
-                    <NavBtn to="/services">Services</NavBtn>
-                    <NavBtn to="/faq">Help</NavBtn>
-                    <NavBtn to="/login">Sign in</NavBtn>
-                    <PrimaryBtn to="/register">Create account</PrimaryBtn>
-                  </nav>
-
-                  {/* MOBILE: CTA + BURGER */}
-                  <div className="md:hidden flex items-center gap-2 shrink-0">
-                    <NavLink
-                      to="/login"
+                    <button
+                      type="button"
+                      onClick={goServices}
                       className={cls(
                         "rounded-2xl px-3 py-2 text-sm font-semibold",
                         "border border-white/10 bg-white/5 text-white/90",
-                        "hover:bg-white/10 hover:border-white/20 transition"
+                        "hover:bg-white/10 hover:border-white/20",
+                        "active:scale-[0.99] transition"
                       )}
                     >
-                      Sign in
-                    </NavLink>
+                      Services
+                    </button>
+
+                    <NavBtn to="/faq" onClick={goHelp}>
+                      Help
+                    </NavBtn>
+
+                    {authed ? (
+                      <>
+                        <Chip>{checking ? "Checking…" : userLabel || "Authenticated"}</Chip>
+                        <NavBtn to="/app/dashboard">Open App</NavBtn>
+                        <button
+                          type="button"
+                          onClick={logout}
+                          className={cls(
+                            "rounded-2xl px-3 py-2 text-sm font-semibold",
+                            "border border-white/10 bg-white/5 text-white/90",
+                            "hover:bg-white/10 hover:border-white/20",
+                            "active:scale-[0.99] transition"
+                          )}
+                        >
+                          Logout
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <NavBtn to="/login">Sign in</NavBtn>
+                        <PrimaryBtn to="/register">Create account</PrimaryBtn>
+                      </>
+                    )}
+                  </nav>
+
+                  {/* MOBILE */}
+                  <div className="md:hidden flex items-center gap-2 shrink-0">
+                    {authed ? (
+                      <button
+                        onClick={() => nav("/app/dashboard")}
+                        className={cls(
+                          "rounded-2xl px-3 py-2 text-sm font-semibold",
+                          "border border-white/10 bg-white/5 text-white/90",
+                          "hover:bg-white/10 hover:border-white/20 transition"
+                        )}
+                        type="button"
+                      >
+                        Open App
+                      </button>
+                    ) : (
+                      <NavLink
+                        to="/login"
+                        className={cls(
+                          "rounded-2xl px-3 py-2 text-sm font-semibold",
+                          "border border-white/10 bg-white/5 text-white/90",
+                          "hover:bg-white/10 hover:border-white/20 transition"
+                        )}
+                      >
+                        Sign in
+                      </NavLink>
+                    )}
 
                     <button
                       onClick={() => setMobileOpen(true)}
@@ -201,6 +351,7 @@ export default function PublicLayout() {
                       )}
                       aria-label="Open menu"
                       title="Menu"
+                      type="button"
                     >
                       ☰
                     </button>
@@ -209,22 +360,26 @@ export default function PublicLayout() {
               </div>
             </div>
 
-            {/* MOBILE DRAWER */}
+            {/* ✅ MOBILE DRAWER (scrollable) */}
             {mobileOpen ? (
               <div className="fixed inset-0 z-[999] md:hidden">
                 <div
                   className="absolute inset-0 bg-black/70 backdrop-blur-sm"
                   onClick={() => setMobileOpen(false)}
                 />
+
                 <div
                   className={cls(
-                    "absolute right-0 top-0 h-full w-[86%] max-w-[360px]",
+                    "absolute right-0 top-0 h-[100dvh] w-[86%] max-w-[360px]",
                     "border-l border-white/10 bg-zinc-950/92 backdrop-blur-2xl",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_30px_120px_rgba(0,0,0,0.65)]"
+                    "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_30px_120px_rgba(0,0,0,0.65)]",
+                    "overflow-y-auto overscroll-contain"
                   )}
+                  style={{ WebkitOverflowScrolling: "touch" }}
                 >
                   <div className="pt-[env(safe-area-inset-top)]" />
-                  <div className="p-4">
+
+                  <div className="p-4 pb-[calc(env(safe-area-inset-bottom)+18px)]">
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-extrabold tracking-tight text-white">
                         Menu
@@ -233,25 +388,37 @@ export default function PublicLayout() {
                         onClick={() => setMobileOpen(false)}
                         className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/10 hover:border-white/20 transition"
                         aria-label="Close menu"
+                        type="button"
                       >
                         ✕
                       </button>
                     </div>
 
+                    {authed ? (
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70">
+                        Logged in as <span className="text-white/90 font-semibold">{userLabel}</span>
+                      </div>
+                    ) : (
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70">
+                        Guest mode: browse services publicly. Create an account to order.
+                      </div>
+                    )}
+
                     <div className="mt-4 grid gap-2">
-                      <NavLink
-                        to="/services"
-                        className={({ isActive }) =>
-                          cls(
-                            "rounded-2xl px-4 py-3 text-sm font-semibold",
-                            "border border-white/10 bg-white/5 text-white/90",
-                            "hover:bg-white/10 hover:border-white/20 transition",
-                            isActive && "bg-white/10 border-white/20"
-                          )
-                        }
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobileOpen(false);
+                          goServices();
+                        }}
+                        className={cls(
+                          "w-full text-left rounded-2xl px-4 py-3 text-sm font-semibold",
+                          "border border-white/10 bg-white/5 text-white/90",
+                          "hover:bg-white/10 hover:border-white/20 transition"
+                        )}
                       >
                         Services
-                      </NavLink>
+                      </button>
 
                       <NavLink
                         to="/faq"
@@ -263,48 +430,110 @@ export default function PublicLayout() {
                             isActive && "bg-white/10 border-white/20"
                           )
                         }
+                        onClick={() => setMobileOpen(false)}
                       >
-                        Help
+                        Help / FAQ
                       </NavLink>
+
+                      {authed ? (
+                        <>
+                          <NavLink
+                            to="/app/dashboard"
+                            className={cls(
+                              "rounded-2xl px-4 py-3 text-sm font-semibold",
+                              "border border-white/10 bg-white/10 text-white",
+                              "hover:bg-white/15 transition",
+                              "active:scale-[0.99]"
+                            )}
+                            onClick={() => setMobileOpen(false)}
+                          >
+                            Open App
+                          </NavLink>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMobileOpen(false);
+                              logout();
+                            }}
+                            className={cls(
+                              "rounded-2xl px-4 py-3 text-sm font-semibold",
+                              "border border-white/10 bg-white/5 text-white/90",
+                              "hover:bg-white/10 hover:border-white/20 transition"
+                            )}
+                          >
+                            Logout
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <NavLink
+                            to="/login"
+                            className={({ isActive }) =>
+                              cls(
+                                "rounded-2xl px-4 py-3 text-sm font-semibold",
+                                "border border-white/10 bg-white/5 text-white/90",
+                                "hover:bg-white/10 hover:border-white/20 transition",
+                                isActive && "bg-white/10 border-white/20"
+                              )
+                            }
+                            onClick={() => setMobileOpen(false)}
+                          >
+                            Sign in
+                          </NavLink>
+
+                          <NavLink
+                            to="/register"
+                            className={cls(
+                              "rounded-2xl px-4 py-3 text-sm font-semibold",
+                              "bg-white text-zinc-900 hover:bg-zinc-200 transition",
+                              "active:scale-[0.99]"
+                            )}
+                            onClick={() => setMobileOpen(false)}
+                          >
+                            Create account
+                          </NavLink>
+                        </>
+                      )}
+
+                      <div className="mt-2 h-px w-full bg-white/10" />
 
                       <NavLink
-                        to="/login"
-                        className={({ isActive }) =>
-                          cls(
-                            "rounded-2xl px-4 py-3 text-sm font-semibold",
-                            "border border-white/10 bg-white/5 text-white/90",
-                            "hover:bg-white/10 hover:border-white/20 transition",
-                            isActive && "bg-white/10 border-white/20"
-                          )
-                        }
+                        to="/terms"
+                        className="rounded-2xl px-4 py-3 text-sm font-semibold border border-white/10 bg-white/5 text-white/90 hover:bg-white/10 hover:border-white/20 transition"
+                        onClick={() => setMobileOpen(false)}
                       >
-                        Sign in
+                        Terms
                       </NavLink>
-
                       <NavLink
-                        to="/register"
-                        className={cls(
-                          "rounded-2xl px-4 py-3 text-sm font-semibold",
-                          "bg-white text-zinc-900 hover:bg-zinc-200 transition",
-                          "active:scale-[0.99]"
-                        )}
+                        to="/privacy"
+                        className="rounded-2xl px-4 py-3 text-sm font-semibold border border-white/10 bg-white/5 text-white/90 hover:bg-white/10 hover:border-white/20 transition"
+                        onClick={() => setMobileOpen(false)}
                       >
-                        Create account
+                        Privacy
                       </NavLink>
-                    </div>
-
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70">
-                      Guest mode: browse services publicly. Create an account to order.
+                      <NavLink
+                        to="/refund"
+                        className="rounded-2xl px-4 py-3 text-sm font-semibold border border-white/10 bg-white/5 text-white/90 hover:bg-white/10 hover:border-white/20 transition"
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        Refunds
+                      </NavLink>
+                      <NavLink
+                        to="/contact"
+                        className="rounded-2xl px-4 py-3 text-sm font-semibold border border-white/10 bg-white/5 text-white/90 hover:bg-white/10 hover:border-white/20 transition"
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        Contact
+                      </NavLink>
                     </div>
                   </div>
-
-                  <div className="pb-[env(safe-area-inset-bottom)]" />
                 </div>
               </div>
             ) : null}
           </header>
 
-          {/* ✅ ONLY THIS SCROLLS */}
+          {/* ONLY CONTENT SCROLLS */}
           <div
             className="flex-1 overflow-y-auto overscroll-y-contain"
             style={{ WebkitOverflowScrolling: "touch" }}
