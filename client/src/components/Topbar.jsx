@@ -9,13 +9,30 @@ function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
 
+function isInApp(pathname) {
+  return String(pathname || "").startsWith("/app");
+}
+
 function routeLabel(pathname) {
-  if (pathname.startsWith("/dashboard")) return "Dashboard";
-  if (pathname.startsWith("/services")) return "Services";
-  if (pathname.startsWith("/create-order")) return "Create order";
-  if (pathname.startsWith("/orders")) return "Orders";
-  if (pathname.startsWith("/wallet")) return "Wallet";
-  if (pathname.startsWith("/admin")) return "Admin";
+  const p = String(pathname || "");
+
+  // ✅ new routing: /app/...
+  if (p.startsWith("/app/dashboard")) return "Dashboard";
+  if (p.startsWith("/app/services")) return "Services";
+  if (p.startsWith("/app/create-order")) return "Create order";
+  if (p.startsWith("/app/orders")) return "Orders";
+  if (p.startsWith("/app/wallet")) return "Wallet";
+  if (p.startsWith("/app/admin")) return "Admin";
+
+  // ✅ public
+  if (p === "/") return "Home";
+  if (p.startsWith("/services")) return "Public Services";
+  if (p.startsWith("/faq")) return "Help";
+  if (p.startsWith("/contact")) return "Contact";
+  if (p.startsWith("/terms")) return "Terms";
+  if (p.startsWith("/privacy")) return "Privacy";
+  if (p.startsWith("/refund")) return "Refunds";
+
   return "App";
 }
 
@@ -64,7 +81,10 @@ export default function Topbar() {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     window.dispatchEvent(new Event("auth-changed"));
-    if (redirect) nav("/login", { replace: true });
+
+    // ✅ redirect to /login ONLY when inside /app
+    const path = window.location.pathname || "/";
+    if (redirect && isInApp(path)) nav("/login", { replace: true });
   }
 
   function logout() {
@@ -76,33 +96,44 @@ export default function Topbar() {
     setSbOpen(false);
   }, [loc.pathname]);
 
-  // load me
+  // load me (SOFT on public, HARD only on /app)
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         const token = localStorage.getItem("token");
         if (!token) throw new Error("no token");
+
         const data = await api.get("/api/me");
         if (!alive) return;
+
         setMe(data || null);
         if (data?.role) localStorage.setItem("role", data.role);
       } catch {
         if (!alive) return;
+
+        // ✅ Soft fail: just remove UI user info, DO NOT clear token here.
         setMe(null);
-        if (loc.pathname !== "/login" && loc.pathname !== "/register") {
+
+        // ✅ If you are inside /app and token is invalid → then logout + redirect
+        const path = window.location.pathname || "/";
+        if (isInApp(path)) {
           hardLogout({ redirect: true });
         }
       }
     })();
+
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // refresh me on auth-changed (never hardLogout here)
   useEffect(() => {
     let alive = true;
+
     const onAuthChanged = async () => {
       try {
         const token = localStorage.getItem("token");
@@ -151,17 +182,31 @@ export default function Topbar() {
   );
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
+  function go(pathInApp, fallbackPublic = "/") {
+    // If you are in /app → go inside /app; if you are on public → keep it public
+    const cur = window.location.pathname || "/";
+    if (isInApp(cur)) return nav(pathInApp);
+    return nav(fallbackPublic);
+  }
+
   function onSubmitSearch(e) {
     e.preventDefault();
     const s = q.trim().toLowerCase();
     if (!s) return;
 
-    if (s.startsWith("wal")) return nav("/wallet");
-    if (s.startsWith("ord")) return nav("/orders");
-    if (s.startsWith("ser")) return nav("/services");
-    if (s.startsWith("cre") || s.startsWith("buy")) return nav("/create-order");
-    if (s.startsWith("dash")) return nav("/dashboard");
-    if (s.startsWith("adm") && isAdmin) return nav("/admin/dashboard");
+    // ✅ if you’re in app, search routes go to /app/...
+    const cur = window.location.pathname || "/";
+    const inApp = isInApp(cur);
+
+    const to = (appPath, publicPath) => (inApp ? appPath : publicPath);
+
+    if (s.startsWith("wal")) return nav(to("/app/wallet", "/login"));
+    if (s.startsWith("ord")) return nav(to("/app/orders", "/login"));
+    if (s.startsWith("ser")) return nav(to("/app/services", "/services"));
+    if (s.startsWith("cre") || s.startsWith("buy"))
+      return nav(to("/app/create-order", "/login"));
+    if (s.startsWith("dash")) return nav(to("/app/dashboard", "/login"));
+    if (s.startsWith("adm") && isAdmin) return nav("/app/admin/dashboard");
   }
 
   return (
@@ -180,7 +225,6 @@ export default function Topbar() {
           <div className="px-4 md:px-6 pt-[env(safe-area-inset-top)]">
             <div className="relative z-10 flex h-16 items-center justify-between min-w-0">
               <div className="flex items-center gap-3 min-w-0">
-                {/* ✅ mobile menu opens SidebarDrawer (PORTAL) */}
                 <button
                   onClick={() => setSbOpen(true)}
                   className={cn(
@@ -195,15 +239,13 @@ export default function Topbar() {
                 </button>
 
                 <button
-                  onClick={() => nav("/dashboard")}
+                  onClick={() => go("/app/dashboard", "/")}
                   className="flex items-center gap-3 min-w-0"
-                  title="Go to Dashboard"
+                  title="Home / Dashboard"
                   type="button"
                 >
                   <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
-                    <span className="text-xs font-black tracking-tight text-white">
-                      FB
-                    </span>
+                    <span className="text-xs font-black tracking-tight text-white">FB</span>
                   </div>
 
                   <div className="leading-tight min-w-0">
@@ -271,7 +313,7 @@ export default function Topbar() {
               <div className="flex items-center gap-2 md:gap-3 shrink-0">
                 <div className="hidden md:flex items-center gap-2">
                   <button
-                    onClick={() => nav("/wallet")}
+                    onClick={() => nav("/app/wallet")}
                     className={cn(
                       "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                       "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
@@ -286,7 +328,7 @@ export default function Topbar() {
                   </button>
 
                   <button
-                    onClick={() => nav("/create-order")}
+                    onClick={() => nav("/app/create-order")}
                     className={cn(
                       "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                       "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
@@ -340,7 +382,6 @@ export default function Topbar() {
               </div>
             </div>
 
-            {/* mobile under-bar */}
             <div className="lg:hidden pb-3">
               <div
                 className={cn(
@@ -350,7 +391,7 @@ export default function Topbar() {
                 )}
               >
                 <button
-                  onClick={() => nav("/wallet")}
+                  onClick={() => nav("/app/wallet")}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                     "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90",
@@ -363,7 +404,7 @@ export default function Topbar() {
                 </button>
 
                 <button
-                  onClick={() => nav("/create-order")}
+                  onClick={() => nav("/app/create-order")}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
                     "border border-white/10 bg-white/10 hover:bg-white/15 text-white",
@@ -394,7 +435,6 @@ export default function Topbar() {
         </div>
       </header>
 
-      {/* ✅ THE ONLY mobile sidebar now (Portal) */}
       <SidebarDrawer open={sbOpen} onClose={() => setSbOpen(false)} />
     </>
   );
