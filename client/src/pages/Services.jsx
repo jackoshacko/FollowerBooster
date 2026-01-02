@@ -621,9 +621,9 @@ function saveFavs(set) {
   } catch {}
 }
 
-/* ------------------------------ Sticky helper ------------------------------ */
+/* ------------------------------ Topbar offset (as you already use) ------------------------------ */
 /**
- * FIX #1: measure ONLY the real topbar (not nav/sidebar).
+ * Measures ONLY real topbar.
  * Requirement: Topbar wrapper must have id="app-topbar" OR data-topbar="app".
  */
 function useTopbarOffset(extra = 12) {
@@ -667,6 +667,85 @@ function useTopbarOffset(extra = 12) {
   return top;
 }
 
+/* ------------------------------ FIX: Smart affix (works even if sticky is broken by overflow parents) ------------------------------ */
+
+function getScrollParent(el) {
+  let cur = el;
+  while (cur && cur !== document.body) {
+    const s = window.getComputedStyle(cur);
+    const oy = s.overflowY;
+    if (oy === "auto" || oy === "scroll") return cur;
+    cur = cur.parentElement;
+  }
+  return window;
+}
+
+function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
+  const [fixed, setFixed] = useState(false);
+  const [rect, setRect] = useState({ left: 0, width: 0, height: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const sentinel = sentinelRef.current;
+    const bar = barRef.current;
+    if (!container || !sentinel || !bar) return;
+
+    const scrollParent = getScrollParent(container);
+    const target = scrollParent === window ? window : scrollParent;
+
+    let raf = 0;
+
+    const measure = () => {
+      const c = container.getBoundingClientRect();
+      const b = bar.getBoundingClientRect();
+      setRect({
+        left: Math.round(c.left),
+        width: Math.round(c.width),
+        height: Math.round(b.height),
+      });
+    };
+
+    const tick = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const s = sentinel.getBoundingClientRect();
+        setFixed(s.top <= top);
+        measure();
+      });
+    };
+
+    tick();
+    target.addEventListener("scroll", tick, { passive: true });
+    window.addEventListener("resize", tick);
+
+    let ro = null;
+    if ("ResizeObserver" in window) {
+      ro = new ResizeObserver(() => tick());
+      ro.observe(container);
+      ro.observe(bar);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      target.removeEventListener("scroll", tick);
+      window.removeEventListener("resize", tick);
+      if (ro) ro.disconnect();
+    };
+  }, [containerRef, sentinelRef, barRef, top]);
+
+  const style = fixed
+    ? {
+        position: "fixed",
+        top: `${top}px`,
+        left: `${rect.left}px`,
+        width: `${rect.width}px`,
+        zIndex: 30,
+      }
+    : { position: "relative" };
+
+  return { fixed, style, placeholderH: fixed ? rect.height : 0 };
+}
+
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -677,8 +756,19 @@ export default function Services() {
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  // ✅ sticky offset under Topbar
+  // ✅ top offset under Topbar
   const stickyTop = useTopbarOffset(12);
+
+  // ✅ refs for affix fix
+  const containerRef = useRef(null);
+  const controlsSentinelRef = useRef(null);
+  const controlsBarRef = useRef(null);
+  const affix = useAffixBar({
+    containerRef,
+    sentinelRef: controlsSentinelRef,
+    barRef: controlsBarRef,
+    top: stickyTop,
+  });
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -910,7 +1000,7 @@ export default function Services() {
   const connectedCount = useMemo(() => filtered.filter((x) => x.externalServiceId).length, [filtered]);
 
   return (
-    <div className="space-y-4">
+    <div ref={containerRef} className="space-y-4">
       <style>{`
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
@@ -1034,96 +1124,161 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ CONTROLS: FIX #2 (relative wrapper + glued strip) */}
-      <div className="sticky z-30 relative" style={{ top: `${stickyTop}px` }}>
-        {/* small strip prevents the “floating gap” look */}
-        <div className="pointer-events-none absolute inset-x-0 -top-4 h-4 bg-black/40" />
+      {/* ✅ CONTROLS: sentinel + placeholder + fixed style */}
+      <div ref={controlsSentinelRef} />
 
-        <GlassCard className="p-4">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
-              <div className="relative w-full xl:w-[380px]">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                <input
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
-                  placeholder="Search services… followers, likes, views…"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                />
-                {q ? (
+      {affix.placeholderH ? <div style={{ height: affix.placeholderH }} /> : null}
+
+      <div style={affix.style}>
+        {/* same "glued" look like you had */}
+        <div className="relative">
+          <div className="pointer-events-none absolute inset-x-0 -top-4 h-4 bg-black/40" />
+        </div>
+
+        <div ref={controlsBarRef}>
+          <GlassCard className="p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
+                <div className="relative w-full xl:w-[380px]">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
+                  <input
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
+                    placeholder="Search services… followers, likes, views…"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                  />
+                  {q ? (
+                    <button
+                      type="button"
+                      onClick={() => setQ("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                      title="Clear"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
+                    <SlidersHorizontal className="h-4 w-4" /> Control
+                  </span>
+
+                  {/* mobile filters toggle */}
                   <button
                     type="button"
-                    onClick={() => setQ("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
-                    title="Clear"
+                    onClick={() => setMobileFiltersOpen((v) => !v)}
+                    className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                  >
+                    <Filter className="h-4 w-4" /> Filters
+                  </button>
+
+                  <select
+                    className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
+                    value={cat}
+                    onChange={(e) => setCat(e.target.value)}
+                  >
+                    {categories.map((c) => (
+                      <option key={c} value={c} className="bg-zinc-950">
+                        {c === "all" ? "All categories" : c}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                  >
+                    <option value="featured" className="bg-zinc-950">
+                      Sort: Featured (Smart)
+                    </option>
+                    <option value="price_asc" className="bg-zinc-950">
+                      Price: Low → High
+                    </option>
+                    <option value="price_desc" className="bg-zinc-950">
+                      Price: High → Low
+                    </option>
+                    <option value="name_asc" className="bg-zinc-950">
+                      Name: A → Z
+                    </option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setOnlyConnected((x) => !x)}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm transition",
+                      onlyConnected
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                        : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
+                    )}
+                    title="Show only provider-connected services"
+                  >
+                    <BadgeCheck className="h-4 w-4" />
+                    Connected
+                  </button>
+
+                  {/* desktop price range */}
+                  <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                    <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
+                    <Range
+                      min={0}
+                      max={Math.max(10, price.max)}
+                      valueMin={Math.min(price.min, price.max)}
+                      valueMax={Math.max(price.min, price.max)}
+                      onChange={(v) => {
+                        const mn = Math.max(0, Math.min(v.min, v.max));
+                        const mx = Math.max(mn, Math.max(v.min, v.max));
+                        setPrice({ min: mn, max: mx });
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                    title="Reset filters"
+                  >
+                    <X className="h-4 w-4" />
+                    Reset
+                  </button>
+
+                  <Segmented value={view} onChange={setView} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 xl:justify-end">
+                <div className="text-sm text-zinc-200/70">
+                  Showing <b className="text-white">{filtered.length}</b> • page{" "}
+                  <b className="text-white">
+                    {page}/{totalPages}
+                  </b>
+                </div>
+
+                <Badge tone={connectedCount ? "emerald" : "red"}>
+                  <LinkIcon className="h-3.5 w-3.5" /> {connectedCount}/{filtered.length} connected
+                </Badge>
+              </div>
+            </div>
+
+            {/* mobile filters panel */}
+            {mobileFiltersOpen ? (
+              <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-white">Price range</div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileFiltersOpen(false)}
+                    className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                    title="Close"
                   >
                     <X className="h-4 w-4" />
                   </button>
-                ) : null}
-              </div>
+                </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
-                  <SlidersHorizontal className="h-4 w-4" /> Control
-                </span>
-
-                {/* mobile filters toggle */}
-                <button
-                  type="button"
-                  onClick={() => setMobileFiltersOpen((v) => !v)}
-                  className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
-                >
-                  <Filter className="h-4 w-4" /> Filters
-                </button>
-
-                <select
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
-                  value={cat}
-                  onChange={(e) => setCat(e.target.value)}
-                >
-                  {categories.map((c) => (
-                    <option key={c} value={c} className="bg-zinc-950">
-                      {c === "all" ? "All categories" : c}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value)}
-                >
-                  <option value="featured" className="bg-zinc-950">
-                    Sort: Featured (Smart)
-                  </option>
-                  <option value="price_asc" className="bg-zinc-950">
-                    Price: Low → High
-                  </option>
-                  <option value="price_desc" className="bg-zinc-950">
-                    Price: High → Low
-                  </option>
-                  <option value="name_asc" className="bg-zinc-950">
-                    Name: A → Z
-                  </option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() => setOnlyConnected((x) => !x)}
-                  className={cn(
-                    "inline-flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm transition",
-                    onlyConnected
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                      : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
-                  )}
-                  title="Show only provider-connected services"
-                >
-                  <BadgeCheck className="h-4 w-4" />
-                  Connected
-                </button>
-
-                {/* desktop price range */}
-                <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                <div className="mt-2 flex items-center gap-2">
                   <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                   <Range
                     min={0}
@@ -1137,67 +1292,10 @@ export default function Services() {
                     }}
                   />
                 </div>
-
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
-                  title="Reset filters"
-                >
-                  <X className="h-4 w-4" />
-                  Reset
-                </button>
-
-                <Segmented value={view} onChange={setView} />
               </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-3 xl:justify-end">
-              <div className="text-sm text-zinc-200/70">
-                Showing <b className="text-white">{filtered.length}</b> • page{" "}
-                <b className="text-white">
-                  {page}/{totalPages}
-                </b>
-              </div>
-
-              <Badge tone={connectedCount ? "emerald" : "red"}>
-                <LinkIcon className="h-3.5 w-3.5" /> {connectedCount}/{filtered.length} connected
-              </Badge>
-            </div>
-          </div>
-
-          {/* mobile filters panel */}
-          {mobileFiltersOpen ? (
-            <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-white">Price range</div>
-                <button
-                  type="button"
-                  onClick={() => setMobileFiltersOpen(false)}
-                  className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
-                  title="Close"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="mt-2 flex items-center gap-2">
-                <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
-                <Range
-                  min={0}
-                  max={Math.max(10, price.max)}
-                  valueMin={Math.min(price.min, price.max)}
-                  valueMax={Math.max(price.min, price.max)}
-                  onChange={(v) => {
-                    const mn = Math.max(0, Math.min(v.min, v.max));
-                    const mx = Math.max(mn, Math.max(v.min, v.max));
-                    setPrice({ min: mn, max: mx });
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-        </GlassCard>
+            ) : null}
+          </GlassCard>
+        </div>
       </div>
 
       {/* pinned */}
@@ -1258,7 +1356,9 @@ export default function Services() {
       ) : filtered.length === 0 ? (
         <GlassCard className="p-6">
           <div className="text-white font-semibold">No services found</div>
-          <div className="mt-1 text-sm text-zinc-200/70">Try changing platform/category, price range or clearing search.</div>
+          <div className="mt-1 text-sm text-zinc-200/70">
+            Try changing platform/category, price range or clearing search.
+          </div>
           <button
             type="button"
             onClick={resetFilters}
@@ -1303,7 +1403,9 @@ export default function Services() {
           )}
 
           <div className="flex items-center justify-between">
-            <div className="text-xs text-zinc-200/60">Featured = pinned → connected → best price → clean naming. Pure SaaS.</div>
+            <div className="text-xs text-zinc-200/60">
+              Featured = pinned → connected → best price → clean naming. Pure SaaS.
+            </div>
 
             <div className="flex items-center gap-2">
               <button
