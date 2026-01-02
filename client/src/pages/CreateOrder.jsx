@@ -651,23 +651,23 @@ function ServicePickerModal({
                   </div>
 
                   <div className="space-y-3">
-                    <GlassCard className="p-4">
-                      <div className="text-sm font-semibold text-white">Why this is better</div>
-                      <div className="mt-2 text-xs text-zinc-200/60 leading-relaxed">
-                        Native <code className="text-zinc-100">select</code> na Windows-u gazi Tailwind i napravi
-                        “beli dropdown” preko cele stranice. Ovaj picker je{" "}
-                        <b className="text-zinc-100">100% premium</b>, theme-safe, search + pin + keyboard.
-                      </div>
-                    </GlassCard>
+<GlassCard className="p-4">
+  <div className="text-sm font-semibold text-white">Why this is better</div>
+  <div className="mt-2 text-xs text-zinc-200/60 leading-relaxed">
+    The native <code className="text-zinc-100">select</code> on Windows can override Tailwind styles and create a
+    “white dropdown” that covers the whole page. This picker is{" "}
+    <b className="text-zinc-100">100% premium</b>, theme-safe, and supports search + pin + keyboard navigation.
+  </div>
+</GlassCard>
 
-                    <GlassCard className="p-4">
-                      <div className="text-sm font-semibold text-white">Pro tips</div>
-                      <div className="mt-2 text-xs text-zinc-200/60 space-y-1">
-                        <div>• Pinuj top servise (fav) → uvek gore.</div>
-                        <div>• “Only connected” = nema fail ordera zbog missing provider id.</div>
-                        <div>• Presets ubrzavaju filtriranje (“followers”, “views”…).</div>
-                      </div>
-                    </GlassCard>
+<GlassCard className="p-4">
+  <div className="text-sm font-semibold text-white">Pro tips</div>
+  <div className="mt-2 text-xs text-zinc-200/60 space-y-1">
+    <div>• Pin your top services (favorites) to keep them at the top.</div>
+    <div>• “Only connected” prevents failed orders caused by missing provider IDs.</div>
+    <div>• Presets speed up filtering (e.g. “followers”, “views”, etc.).</div>
+  </div>
+</GlassCard>
                   </div>
                 </div>
               </div>
