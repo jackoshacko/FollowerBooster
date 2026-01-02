@@ -623,24 +623,17 @@ function saveFavs(set) {
 
 /* ------------------------------ Sticky helper ------------------------------ */
 /**
- * Fix: controls bar must be glued under Topbar.
- * We measure topbar height and use it as sticky top offset.
- *
- * Add id="app-topbar" to your Topbar wrapper for best results.
+ * FIX #1: measure ONLY the real topbar (not nav/sidebar).
+ * Requirement: Topbar wrapper must have id="app-topbar" OR data-topbar="app".
  */
 function useTopbarOffset(extra = 12) {
-  const [top, setTop] = useState(12 + extra);
+  const [top, setTop] = useState(extra);
 
   useEffect(() => {
     let raf = 0;
 
     const pickTopbar = () => {
-      return (
-        document.getElementById("app-topbar") ||
-        document.querySelector("[data-topbar]") ||
-        document.querySelector("header") ||
-        document.querySelector("nav")
-      );
+      return document.getElementById("app-topbar") || document.querySelector('[data-topbar="app"]');
     };
 
     const measure = () => {
@@ -657,7 +650,6 @@ function useTopbarOffset(extra = 12) {
     measure();
     window.addEventListener("resize", onResize);
 
-    // watch topbar size changes (mobile, auth, etc.)
     const el = pickTopbar();
     let ro = null;
     if (el && "ResizeObserver" in window) {
@@ -780,7 +772,7 @@ export default function Services() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // keep as-is
 
   const categories = useMemo(() => {
     const set = new Set();
@@ -1042,21 +1034,11 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ CONTROLS: glued under topbar (dynamic offset) */}
-      <div
-        className="sticky z-30"
-        style={{
-          top: `${stickyTop}px`,
-        }}
-      >
-        {/* This filler makes it look "glued" to background (no floating gap) */}
-        <div
-          className="pointer-events-none absolute inset-x-0 -top-6 h-6"
-          style={{
-            background:
-              "linear-gradient(to bottom, rgba(0,0,0,0.65), rgba(0,0,0,0))",
-          }}
-        />
+      {/* ✅ CONTROLS: FIX #2 (relative wrapper + glued strip) */}
+      <div className="sticky z-30 relative" style={{ top: `${stickyTop}px` }}>
+        {/* small strip prevents the “floating gap” look */}
+        <div className="pointer-events-none absolute inset-x-0 -top-4 h-4 bg-black/40" />
+
         <GlassCard className="p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
