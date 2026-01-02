@@ -623,48 +623,6 @@ function saveFavs(set) {
   } catch {}
 }
 
-/* ------------------------------ Topbar offset ------------------------------ */
-
-function useTopbarOffset(extra = 12) {
-  const [top, setTop] = useState(extra);
-
-  useEffect(() => {
-    let raf = 0;
-
-    const pickTopbar = () =>
-      document.getElementById("app-topbar") || document.querySelector('[data-topbar="app"]');
-
-    const measure = () => {
-      const el = pickTopbar();
-      const h = el ? Math.round(el.getBoundingClientRect().height) : 0;
-      setTop(h + extra);
-    };
-
-    const onResize = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(measure);
-    };
-
-    measure();
-    window.addEventListener("resize", onResize);
-
-    const el = pickTopbar();
-    let ro = null;
-    if (el && "ResizeObserver" in window) {
-      ro = new ResizeObserver(onResize);
-      ro.observe(el);
-    }
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-      if (ro) ro.disconnect();
-    };
-  }, [extra]);
-
-  return top;
-}
-
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -673,8 +631,6 @@ export default function Services() {
 
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
-
-  const stickyTop = useTopbarOffset(12);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1026,157 +982,91 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ STICKY CONTROLS — FIXED */}
-      <div
-        className="sticky z-[70] px-4 md:px-6 relative isolate"
-        style={{ top: stickyTop }}
-      >
-        {/* underlay stays INSIDE sticky wrapper now */}
-        <div className="pointer-events-none absolute inset-x-0 -top-3 bottom-0 rounded-2xl bg-zinc-950/80 backdrop-blur-xl" />
-        <div className="pointer-events-none absolute inset-x-0 -top-3 h-3 bg-gradient-to-b from-zinc-950/95 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
-
-        <div className="relative">
-          <GlassCard className="bg-zinc-950/55 p-4">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-              <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
-                <div className="relative w-full xl:w-[380px]">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
-                  <input
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
-                    placeholder="Search services… followers, likes, views…"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                  />
-                  {q ? (
-                    <button
-                      type="button"
-                      onClick={() => setQ("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
-                      title="Clear"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  ) : null}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
-                    <SlidersHorizontal className="h-4 w-4" /> Control
-                  </span>
-
+      {/* ✅ CONTROLS (NOT sticky) - no more "following" */}
+      <div className="px-4 md:px-6">
+        <GlassCard className="bg-zinc-950/55 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
+              <div className="relative w-full xl:w-[380px]">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-300/60" />
+                <input
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-9 py-2.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40 focus:border-white/20"
+                  placeholder="Search services… followers, likes, views…"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+                {q ? (
                   <button
                     type="button"
-                    onClick={() => setMobileFiltersOpen((v) => !v)}
-                    className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
-                  >
-                    <Filter className="h-4 w-4" /> Filters
-                  </button>
-
-                  <select
-                    className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
-                    value={cat}
-                    onChange={(e) => setCat(e.target.value)}
-                  >
-                    {categories.map((c) => (
-                      <option key={c} value={c} className="bg-zinc-950">
-                        {c === "all" ? "All categories" : c}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
-                    value={sort}
-                    onChange={(e) => setSort(e.target.value)}
-                  >
-                    <option value="featured" className="bg-zinc-950">
-                      Sort: Featured (Smart)
-                    </option>
-                    <option value="price_asc" className="bg-zinc-950">
-                      Price: Low → High
-                    </option>
-                    <option value="price_desc" className="bg-zinc-950">
-                      Price: High → Low
-                    </option>
-                    <option value="name_asc" className="bg-zinc-950">
-                      Name: A → Z
-                    </option>
-                  </select>
-
-                  <button
-                    type="button"
-                    onClick={() => setOnlyConnected((x) => !x)}
-                    className={cn(
-                      "inline-flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm transition",
-                      onlyConnected
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                        : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
-                    )}
-                    title="Show only provider-connected services"
-                  >
-                    <BadgeCheck className="h-4 w-4" />
-                    Connected
-                  </button>
-
-                  <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
-                    <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
-                    <Range
-                      min={0}
-                      max={Math.max(10, price.max)}
-                      valueMin={Math.min(price.min, price.max)}
-                      valueMax={Math.max(price.min, price.max)}
-                      onChange={(v) => {
-                        const mn = Math.max(0, Math.min(v.min, v.max));
-                        const mx = Math.max(mn, Math.max(v.min, v.max));
-                        setPrice({ min: mn, max: mx });
-                      }}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={resetFilters}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
-                    title="Reset filters"
-                  >
-                    <X className="h-4 w-4" />
-                    Reset
-                  </button>
-
-                  <Segmented value={view} onChange={setView} />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 xl:justify-end">
-                <div className="text-sm text-zinc-200/70">
-                  Showing <b className="text-white">{filtered.length}</b> • page{" "}
-                  <b className="text-white">
-                    {page}/{totalPages}
-                  </b>
-                </div>
-
-                <Badge tone={connectedCount ? "emerald" : "red"}>
-                  <LinkIcon className="h-3.5 w-3.5" /> {connectedCount}/{filtered.length} connected
-                </Badge>
-              </div>
-            </div>
-
-            {mobileFiltersOpen ? (
-              <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-white">Price range</div>
-                  <button
-                    type="button"
-                    onClick={() => setMobileFiltersOpen(false)}
-                    className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
-                    title="Close"
+                    onClick={() => setQ("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                    title="Clear"
                   >
                     <X className="h-4 w-4" />
                   </button>
-                </div>
+                ) : null}
+              </div>
 
-                <div className="mt-2 flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-zinc-100/80">
+                  <SlidersHorizontal className="h-4 w-4" /> Control
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setMobileFiltersOpen((v) => !v)}
+                  className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                >
+                  <Filter className="h-4 w-4" /> Filters
+                </button>
+
+                <select
+                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
+                  value={cat}
+                  onChange={(e) => setCat(e.target.value)}
+                >
+                  {categories.map((c) => (
+                    <option key={c} value={c} className="bg-zinc-950">
+                      {c === "all" ? "All categories" : c}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 outline-none focus:border-white/20"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                >
+                  <option value="featured" className="bg-zinc-950">
+                    Sort: Featured (Smart)
+                  </option>
+                  <option value="price_asc" className="bg-zinc-950">
+                    Price: Low → High
+                  </option>
+                  <option value="price_desc" className="bg-zinc-950">
+                    Price: High → Low
+                  </option>
+                  <option value="name_asc" className="bg-zinc-950">
+                    Name: A → Z
+                  </option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setOnlyConnected((x) => !x)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-2xl border px-3 py-2.5 text-sm transition",
+                    onlyConnected
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                      : "border-white/10 bg-white/5 text-zinc-100 hover:bg-white/10"
+                  )}
+                  title="Show only provider-connected services"
+                >
+                  <BadgeCheck className="h-4 w-4" />
+                  Connected
+                </button>
+
+                <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
                   <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                   <Range
                     min={0}
@@ -1190,10 +1080,66 @@ export default function Services() {
                     }}
                   />
                 </div>
+
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                  title="Reset filters"
+                >
+                  <X className="h-4 w-4" />
+                  Reset
+                </button>
+
+                <Segmented value={view} onChange={setView} />
               </div>
-            ) : null}
-          </GlassCard>
-        </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 xl:justify-end">
+              <div className="text-sm text-zinc-200/70">
+                Showing <b className="text-white">{filtered.length}</b> • page{" "}
+                <b className="text-white">
+                  {page}/{totalPages}
+                </b>
+              </div>
+
+              <Badge tone={connectedCount ? "emerald" : "red"}>
+                <LinkIcon className="h-3.5 w-3.5" /> {connectedCount}/{filtered.length} connected
+              </Badge>
+            </div>
+          </div>
+
+          {mobileFiltersOpen ? (
+            <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-white">Price range</div>
+                <button
+                  type="button"
+                  onClick={() => setMobileFiltersOpen(false)}
+                  className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
+                  title="Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
+                <Range
+                  min={0}
+                  max={Math.max(10, price.max)}
+                  valueMin={Math.min(price.min, price.max)}
+                  valueMax={Math.max(price.min, price.max)}
+                  onChange={(v) => {
+                    const mn = Math.max(0, Math.min(v.min, v.max));
+                    const mx = Math.max(mn, Math.max(v.min, v.max));
+                    setPrice({ min: mn, max: mx });
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </GlassCard>
       </div>
 
       {/* pinned */}
@@ -1254,9 +1200,7 @@ export default function Services() {
       ) : filtered.length === 0 ? (
         <GlassCard className="p-6">
           <div className="font-semibold text-white">No services found</div>
-          <div className="mt-1 text-sm text-zinc-200/70">
-            Try changing platform/category, price range or clearing search.
-          </div>
+          <div className="mt-1 text-sm text-zinc-200/70">Try changing platform/category, price range or clearing search.</div>
           <button
             type="button"
             onClick={resetFilters}
@@ -1301,9 +1245,7 @@ export default function Services() {
           )}
 
           <div className="flex items-center justify-between">
-            <div className="text-xs text-zinc-200/60">
-              Featured = pinned → connected → best price → clean naming. Pure SaaS.
-            </div>
+            <div className="text-xs text-zinc-200/60">Featured = pinned → connected → best price → clean naming. Pure SaaS.</div>
 
             <div className="flex items-center gap-2">
               <button
