@@ -27,6 +27,13 @@ import {
   Filter,
 } from "lucide-react";
 
+/**
+ * IMPORTANT (1x change outside this file):
+ * - AppLayout main container MUST have: <main id="app-main">...</main>
+ * - Topbar wrapper should have id="app-topbar" OR data-topbar="app"
+ * This makes the controls bar perfectly locked under topbar on any layout.
+ */
+
 /* ------------------------------ labels ------------------------------ */
 
 const PLATFORM_LABEL = {
@@ -675,6 +682,72 @@ function useTopbarOffset(extra = 12) {
   return top;
 }
 
+/* ------------------------------ LOCKED controls bar (FIXED, no drifting) ------------------------------ */
+/**
+ * Locks a bar under topbar and aligns it to #app-main width/left.
+ * NO scroll listeners. Only resize/RO => no "plivanje".
+ */
+function useLockedBarInMain(topPx) {
+  const barRef = useRef(null);
+  const [state, setState] = useState({ style: null, h: 0 });
+
+  useEffect(() => {
+    let raf = 0;
+    let roMain = null;
+    let roBar = null;
+
+    const pickMain = () => document.getElementById("app-main") || document.querySelector("main");
+
+    const measure = () => {
+      const main = pickMain();
+      const bar = barRef.current;
+      if (!main || !bar) return;
+
+      const r = main.getBoundingClientRect();
+      const h = Math.round(bar.getBoundingClientRect().height);
+
+      setState({
+        h,
+        style: {
+          position: "fixed",
+          top: `${topPx}px`,
+          left: `${Math.round(r.left)}px`,
+          width: `${Math.round(r.width)}px`,
+          zIndex: 50,
+        },
+      });
+    };
+
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+
+    schedule();
+    window.addEventListener("resize", schedule);
+
+    const main = pickMain();
+    if (main && "ResizeObserver" in window) {
+      roMain = new ResizeObserver(schedule);
+      roMain.observe(main);
+    }
+
+    if ("ResizeObserver" in window && barRef.current) {
+      roBar = new ResizeObserver(schedule);
+      roBar.observe(barRef.current);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", schedule);
+      if (roMain) roMain.disconnect();
+      if (roBar) roBar.disconnect();
+    };
+  }, [topPx]);
+
+  return { barRef, style: state.style, height: state.h };
+}
+
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -685,8 +758,11 @@ export default function Services() {
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  // ✅ sticky top under Topbar
+  // ✅ sticky/fixed top under Topbar
   const stickyTop = useTopbarOffset(12);
+
+  // ✅ locked bar under topbar, aligned to app-main
+  const locked = useLockedBarInMain(stickyTop);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -924,10 +1000,6 @@ export default function Services() {
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
-
-        /* Safety: if some parent uses transform, sticky can break.
-           Nothing here changes layout, but helps avoid "tiny gaps" on iOS. */
-        .sticky-surface { transform: translateZ(0); }
       `}</style>
 
       {/* toast */}
@@ -1046,24 +1118,16 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ CONTROLS (TRUE sticky, no fixed-left/width hack, no dragging) */}
-      <div
-        className={cn(
-          "sticky z-30 sticky-surface",
-          // full-bleed inside page padding so it “touches” background (no side gaps)
-          "-mx-4 md:-mx-6",
-          "px-4 md:px-6"
-        )}
-        style={{ top: `${stickyTop}px` }}
-      >
-        {/* Underlay that seals the content below (no “floating” look) */}
+      {/* ✅ LOCKED CONTROLS: stays under topbar, never scrolls away */}
+      {locked.height ? <div style={{ height: locked.height + 12 }} /> : null}
+
+      <div style={locked.style || {}} className="px-4 md:px-6">
+        {/* Underlay that seals the content below (no floating look) */}
         <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/85 backdrop-blur-xl" />
-        {/* Soft fade into topbar */}
         <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-b from-zinc-950/95 to-transparent" />
-        {/* Small shadow line */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
-        <div className="relative">
+        <div ref={locked.barRef} className="relative">
           <GlassCard className="bg-zinc-950/55 p-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
@@ -1096,7 +1160,7 @@ export default function Services() {
                   <button
                     type="button"
                     onClick={() => setMobileFiltersOpen((v) => !v)}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10 xl:hidden"
+                    className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
                   >
                     <Filter className="h-4 w-4" /> Filters
                   </button>
@@ -1148,7 +1212,7 @@ export default function Services() {
                   </button>
 
                   {/* desktop price range */}
-                  <div className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 xl:flex">
+                  <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
                     <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                     <Range
                       min={0}
@@ -1193,7 +1257,7 @@ export default function Services() {
 
             {/* mobile filters panel */}
             {mobileFiltersOpen ? (
-              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 xl:hidden">
+              <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold text-white">Price range</div>
                   <button
