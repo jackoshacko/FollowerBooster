@@ -75,7 +75,6 @@ async function copyText(s) {
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
-    // fallback
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -252,7 +251,7 @@ function normalizeService(s) {
   };
 }
 
-/* ------------------------------ modal ------------------------------ */
+/* ------------------------------ modal helpers ------------------------------ */
 
 function fmtRange(min, max) {
   if (!min && !max) return "—";
@@ -667,101 +666,6 @@ function useTopbarOffset(extra = 12) {
   return top;
 }
 
-/* ------------------------------ FIX: Smart affix ------------------------------ */
-/**
- * PROBLEM: u app layoutu često scroll nije window nego neki wrapper div (overflow-y-auto).
- * REŠENJE: slušaj scroll na documentu u CAPTURE modu → hvata scroll bilo kog scroll-container-a.
- */
-
-function getScrollParent(el) {
-  let cur = el;
-  while (cur && cur !== document.body) {
-    const s = window.getComputedStyle(cur);
-    const oy = s.overflowY;
-    const isScrollable =
-      (oy === "auto" || oy === "scroll" || oy === "overlay") && cur.scrollHeight > cur.clientHeight + 1;
-    if (isScrollable) return cur;
-    cur = cur.parentElement;
-  }
-  return window;
-}
-
-function useAffixBar({ containerRef, sentinelRef, barRef, top }) {
-  const [fixed, setFixed] = useState(false);
-  const [rect, setRect] = useState({ left: 0, width: 0, height: 0 });
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const sentinel = sentinelRef.current;
-    const bar = barRef.current;
-    if (!container || !sentinel || !bar) return;
-
-    // we still compute left/width based on container
-    const scrollParent = getScrollParent(container);
-
-    let raf = 0;
-
-    const measure = () => {
-      const c = container.getBoundingClientRect();
-      const b = bar.getBoundingClientRect();
-      setRect({
-        left: Math.round(c.left),
-        width: Math.round(c.width),
-        height: Math.round(b.height),
-      });
-    };
-
-    const tick = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const s = sentinel.getBoundingClientRect();
-        setFixed(s.top <= top);
-        measure();
-      });
-    };
-
-    // initial
-    tick();
-
-    // ✅ IMPORTANT: capture scroll from ANY scroll container (window OR nested)
-    const onDocScroll = () => tick();
-
-    document.addEventListener("scroll", onDocScroll, { passive: true, capture: true });
-    window.addEventListener("resize", tick);
-
-    // also listen to the probable scroll parent (not required but fine)
-    const sp = scrollParent === window ? window : scrollParent;
-    sp.addEventListener?.("scroll", tick, { passive: true });
-
-    let ro = null;
-    if ("ResizeObserver" in window) {
-      ro = new ResizeObserver(() => tick());
-      ro.observe(container);
-      ro.observe(bar);
-    }
-
-    return () => {
-      cancelAnimationFrame(raf);
-      document.removeEventListener("scroll", onDocScroll, true);
-      window.removeEventListener("resize", tick);
-      sp.removeEventListener?.("scroll", tick);
-      if (ro) ro.disconnect();
-    };
-  }, [containerRef, sentinelRef, barRef, top]);
-
-  const style = fixed
-    ? {
-        position: "fixed",
-        top: `${top}px`,
-        left: `${rect.left}px`,
-        width: `${rect.width}px`,
-        zIndex: 40,
-      }
-    : { position: "relative" };
-
-  return { fixed, style, placeholderH: fixed ? rect.height : 0 };
-}
-
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -772,19 +676,8 @@ export default function Services() {
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  // ✅ top offset under Topbar
+  // ✅ sticky top under Topbar
   const stickyTop = useTopbarOffset(12);
-
-  // ✅ refs for affix fix
-  const containerRef = useRef(null);
-  const controlsSentinelRef = useRef(null);
-  const controlsBarRef = useRef(null);
-  const affix = useAffixBar({
-    containerRef,
-    sentinelRef: controlsSentinelRef,
-    barRef: controlsBarRef,
-    top: stickyTop,
-  });
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1016,7 +909,7 @@ export default function Services() {
   const connectedCount = useMemo(() => filtered.filter((x) => x.externalServiceId).length, [filtered]);
 
   return (
-    <div ref={containerRef} className="space-y-4">
+    <div className="space-y-4">
       <style>{`
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
@@ -1140,19 +1033,26 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ CONTROLS: sentinel + placeholder + fixed style */}
-      <div ref={controlsSentinelRef} />
+      {/* ✅ CONTROLS (TRUE sticky + SOLID underlay glued to bg) */}
+      <div
+        className={cn(
+          "sticky z-30",
+          // full-bleed so it touches background edge-to-edge (no gap on mobile)
+          "-mx-4 md:-mx-6",
+          "px-4 md:px-6",
+          "pt-0"
+        )}
+        style={{ top: `${stickyTop}px` }}
+      >
+        {/* Underlay that seals the content below (no “floating”) */}
+        <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/85 backdrop-blur-xl" />
+        {/* Soft fade on top so it blends into the topbar */}
+        <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-b from-zinc-950/95 to-transparent" />
+        {/* Small shadow line so it feels attached */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
-      {affix.placeholderH ? <div style={{ height: affix.placeholderH }} /> : null}
-
-      <div style={affix.style}>
-        {/* same "glued" look */}
         <div className="relative">
-          <div className="pointer-events-none absolute inset-x-0 -top-4 h-4 bg-black/40" />
-        </div>
-
-        <div ref={controlsBarRef}>
-          <GlassCard className="p-4">
+          <GlassCard className="p-4 bg-zinc-950/55">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
                 <div className="relative w-full xl:w-[380px]">
