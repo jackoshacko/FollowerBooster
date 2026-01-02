@@ -93,8 +93,10 @@ function Chip({ children }) {
     <span
       className={cls(
         "inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold",
-        "border border-white/10 bg-white/5 text-white/90 backdrop-blur-xl",
-        "shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
+        "border border-white/10 bg-white/5 text-white/90",
+        // ✅ blur/shadow samo na desktop (mobile jank killer)
+        "md:backdrop-blur-xl",
+        "md:shadow-[0_0_0_1px_rgba(255,255,255,0.04)]"
       )}
     >
       {children}
@@ -149,7 +151,6 @@ export default function PublicLayout() {
         setMe(data || null);
         if (data?.role) setRole(data.role);
       } catch (e) {
-        // Keep it soft on public pages.
         if (!alive) return;
         setMe(null);
       } finally {
@@ -194,7 +195,6 @@ export default function PublicLayout() {
   const userLabel = useMemo(() => me?.email || me?.username || me?.name || "", [me]);
 
   function logout() {
-    // Public logout should be real logout
     clearAuthLocal();
     setToken("");
     setUser(null);
@@ -204,7 +204,6 @@ export default function PublicLayout() {
     nav("/login", { replace: true });
   }
 
-  // Optional: if user is authed and clicks "Services" on public, jump into /app/services
   function goServices() {
     if (authed) nav("/app/services");
     else nav("/services");
@@ -213,12 +212,14 @@ export default function PublicLayout() {
     nav("/faq");
   }
 
+  // ✅ mobile perf: blur + massive shadow samo na desktop
   const isGlassBar = useMemo(
     () =>
       cls(
         "border-b border-white/10",
-        "bg-black/45 backdrop-blur-xl",
-        "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_60px_rgba(0,0,0,0.35)]"
+        "bg-black/45",
+        "md:backdrop-blur-xl",
+        "md:shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_60px_rgba(0,0,0,0.35)]"
       ),
     []
   );
@@ -256,7 +257,7 @@ export default function PublicLayout() {
                     title="Home"
                     type="button"
                   >
-                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white/10 bg-white/5 md:shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_18px_55px_rgba(168,85,247,0.12)] shrink-0">
                       <span className="text-xs font-black tracking-tight text-white">FB</span>
                     </div>
 
@@ -364,14 +365,18 @@ export default function PublicLayout() {
             {mobileOpen ? (
               <div className="fixed inset-0 z-[999] md:hidden">
                 <div
-                  className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+                  className="absolute inset-0 bg-black/70"
+                  // ✅ blur off na mobile overlay (perf)
+                  // "backdrop-blur-sm" = remove
                   onClick={() => setMobileOpen(false)}
                 />
 
                 <div
                   className={cls(
                     "absolute right-0 top-0 h-[100dvh] w-[86%] max-w-[360px]",
-                    "border-l border-white/10 bg-zinc-950/92 backdrop-blur-2xl",
+                    "border-l border-white/10 bg-zinc-950/92",
+                    // ✅ NAJVEĆI mobile jank: backdrop-blur-2xl + huge shadow
+                    // ostavi samo normal shadow, bez blur
                     "shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_30px_120px_rgba(0,0,0,0.65)]",
                     "overflow-y-auto overscroll-contain"
                   )}
@@ -396,7 +401,8 @@ export default function PublicLayout() {
 
                     {authed ? (
                       <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70">
-                        Logged in as <span className="text-white/90 font-semibold">{userLabel}</span>
+                        Logged in as{" "}
+                        <span className="text-white/90 font-semibold">{userLabel}</span>
                       </div>
                     ) : (
                       <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-zinc-200/70">
@@ -548,7 +554,8 @@ export default function PublicLayout() {
               <Outlet />
             </main>
 
-            <footer className="border-t border-white/10 bg-black/25 backdrop-blur-xl">
+            {/* ✅ footer blur samo desktop */}
+            <footer className="border-t border-white/10 bg-black/25 md:backdrop-blur-xl">
               <div className="mx-auto max-w-[1200px] 2xl:max-w-[1400px] px-4 md:px-6 py-6 text-sm text-zinc-300/70 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>© {new Date().getFullYear()} FollowerBooster</div>
                 <div className="flex flex-wrap gap-4">
