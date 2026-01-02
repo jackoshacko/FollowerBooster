@@ -1,6 +1,11 @@
 {
   "routes": [
+    { "src": "/og-image\\.png", "dest": "/og-image.png" },
+    { "src": "/favicon\\.png", "dest": "/favicon.png" },
+    { "src": "/apple-touch-icon\\.png", "dest": "/apple-touch-icon.png" },
+
     { "src": "/assets/(.*)", "headers": { "cache-control": "public, max-age=31536000, immutable" } },
+
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
