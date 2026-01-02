@@ -32,8 +32,8 @@ export default function AppLayout() {
   }, [loc.pathname]);
 
   return (
-    <div className="min-h-[100dvh] w-full overflow-x-clip bg-zinc-950 text-zinc-100">
-      {/* background FIXED (nema crnog kraja na mobu) */}
+    <div className="h-[100dvh] w-full overflow-hidden bg-zinc-950 text-zinc-100">
+      {/* background FIXED */}
       <div className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-zinc-950" />
         <div
@@ -47,9 +47,9 @@ export default function AppLayout() {
         <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
       </div>
 
-      <div className="relative z-10 flex min-h-[100dvh] w-full overflow-x-clip">
+      <div className="relative z-10 flex h-[100dvh] w-full overflow-hidden">
         {/* Desktop sidebar */}
-        <aside className="hidden md:block">
+        <aside className="hidden md:block shrink-0">
           <Sidebar />
         </aside>
 
@@ -57,12 +57,14 @@ export default function AppLayout() {
         <SidebarDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
         {/* MAIN */}
-        <div className="relative flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-x-clip">
-          <div className="sticky top-0 z-40">
+        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Topbar sticky */}
+          <div className="sticky top-0 z-40" id="app-topbar" data-topbar="app">
             <Topbar onOpenSidebar={() => setMobileOpen(true)} />
           </div>
 
-          <div className="min-w-0 flex-1 overflow-x-clip">
+          {/* ✅ SCROLL CONTAINER (umesto window scroll) */}
+          <div className="min-w-0 flex-1 overflow-y-auto overflow-x-clip overscroll-contain">
             <main
               className={[
                 "mx-auto w-full min-w-0 max-w-[1200px] 2xl:max-w-[1400px]",
@@ -72,9 +74,9 @@ export default function AppLayout() {
             >
               <Outlet />
             </main>
-          </div>
 
-          <CookieNotice />
+            <CookieNotice />
+          </div>
         </div>
       </div>
     </div>
