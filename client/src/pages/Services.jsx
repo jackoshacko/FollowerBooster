@@ -176,7 +176,6 @@ function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
   return (
     <div className="flex items-center gap-2">
       <div className="text-xs text-zinc-200/70 w-12">{money2(vMin)}€</div>
-
       <input
         type="range"
         min={min}
@@ -193,7 +192,6 @@ function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
         onChange={(e) => onChange({ min: vMin, max: Number(e.target.value) })}
         className="w-28"
       />
-
       <div className="text-xs text-zinc-200/70 w-12 text-right">{money2(vMax)}€</div>
     </div>
   );
@@ -233,8 +231,7 @@ function normalizeService(s) {
   const maxRaw = s?.max ?? s?.maxOrder ?? s?.max_order ?? 0;
 
   const category = (s?.category || s?.type || "Other").toString().trim() || "Other";
-  const name =
-    s?.name || s?.title || `Service ${String(externalId ?? id).slice(-6)}` || "—";
+  const name = s?.name || s?.title || `Service ${String(externalId ?? id).slice(-6)}` || "—";
 
   const platform = s?.platform ? platformToLabel(s.platform) : inferPlatformFromCategory(category);
 
@@ -250,7 +247,6 @@ function normalizeService(s) {
     min: safeNum(minRaw, 0),
     max: safeNum(maxRaw, 0),
     enabled: s?.enabled !== false,
-
     externalServiceId: externalId,
     provider: s?.provider || "default",
   };
@@ -275,9 +271,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <div className="text-xl font-black tracking-tight text-white">
-                  {s.name || "Service"}
-                </div>
+                <div className="text-xl font-black tracking-tight text-white">{s.name || "Service"}</div>
                 <Badge tone="violet">{s.platform || "Other"}</Badge>
               </div>
 
@@ -319,8 +313,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                 Provider: <span className="text-zinc-100">{s.provider || "default"}</span>{" "}
                 {connected ? (
                   <>
-                    • External ID:{" "}
-                    <span className="font-mono text-zinc-100">{String(s.externalServiceId)}</span>
+                    • External ID: <span className="font-mono text-zinc-100">{String(s.externalServiceId)}</span>
                   </>
                 ) : null}
               </div>
@@ -452,12 +445,8 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
                 {money2(s.rate)}€ / 1000
               </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
-                min {s.min || "—"}
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
-                max {s.max || "—"}
-              </span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">min {s.min || "—"}</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">max {s.max || "—"}</span>
               <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5">
                 id …{String(s._id).slice(-6)}
               </span>
@@ -632,6 +621,60 @@ function saveFavs(set) {
   } catch {}
 }
 
+/* ------------------------------ Sticky helper ------------------------------ */
+/**
+ * Fix: controls bar must be glued under Topbar.
+ * We measure topbar height and use it as sticky top offset.
+ *
+ * Add id="app-topbar" to your Topbar wrapper for best results.
+ */
+function useTopbarOffset(extra = 12) {
+  const [top, setTop] = useState(12 + extra);
+
+  useEffect(() => {
+    let raf = 0;
+
+    const pickTopbar = () => {
+      return (
+        document.getElementById("app-topbar") ||
+        document.querySelector("[data-topbar]") ||
+        document.querySelector("header") ||
+        document.querySelector("nav")
+      );
+    };
+
+    const measure = () => {
+      const el = pickTopbar();
+      const h = el ? Math.round(el.getBoundingClientRect().height) : 0;
+      setTop(h + extra);
+    };
+
+    const onResize = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+
+    measure();
+    window.addEventListener("resize", onResize);
+
+    // watch topbar size changes (mobile, auth, etc.)
+    const el = pickTopbar();
+    let ro = null;
+    if (el && "ResizeObserver" in window) {
+      ro = new ResizeObserver(() => onResize());
+      ro.observe(el);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+      if (ro) ro.disconnect();
+    };
+  }, [extra]);
+
+  return top;
+}
+
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -641,6 +684,9 @@ export default function Services() {
   // ✅ base path: radi i na /services i na /app/services
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
+
+  // ✅ sticky offset under Topbar
+  const stickyTop = useTopbarOffset(12);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -710,18 +756,15 @@ export default function Services() {
         const norm = list.map(normalizeService).filter((x) => x._id && x.enabled !== false);
         if (mounted) setItems(norm);
 
-        // auto-set platform if current selected has 0
         if (mounted) {
           const counts = new Map(platforms.map((p) => [p, 0]));
           for (const s of norm) counts.set(s.platform || "Other", (counts.get(s.platform || "Other") || 0) + 1);
-
           if ((counts.get(platform) || 0) === 0) {
             const first = platforms.find((p) => (counts.get(p) || 0) > 0) || "Other";
             setPlatform(first);
           }
         }
 
-        // auto-set price max based on data
         const rates = norm.map((x) => safeNum(x.rate, 0)).filter((x) => x > 0);
         const maxRate = rates.length ? Math.min(999, Math.max(...rates)) : 50;
         if (mounted) setPrice({ min: 0, max: Math.max(10, Math.ceil(maxRate)) });
@@ -876,7 +919,6 @@ export default function Services() {
 
   return (
     <div className="space-y-4">
-      {/* masonry css */}
       <style>{`
         .masonry { column-gap: 1rem; }
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
@@ -946,7 +988,7 @@ export default function Services() {
             </div>
           </div>
 
-          {/* ✅ no <a href> (no reload), respects /app */}
+          {/* no <a href> (no reload), respects /app */}
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <button
               type="button"
@@ -1000,8 +1042,21 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ sticky controls (offset a bit so it doesn't fight topbar) */}
-      <div className="sticky top-3 z-10">
+      {/* ✅ CONTROLS: glued under topbar (dynamic offset) */}
+      <div
+        className="sticky z-30"
+        style={{
+          top: `${stickyTop}px`,
+        }}
+      >
+        {/* This filler makes it look "glued" to background (no floating gap) */}
+        <div
+          className="pointer-events-none absolute inset-x-0 -top-6 h-6"
+          style={{
+            background:
+              "linear-gradient(to bottom, rgba(0,0,0,0.65), rgba(0,0,0,0))",
+          }}
+        />
         <GlassCard className="p-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
@@ -1030,7 +1085,7 @@ export default function Services() {
                   <SlidersHorizontal className="h-4 w-4" /> Control
                 </span>
 
-                {/* ✅ mobile filters toggle */}
+                {/* mobile filters toggle */}
                 <button
                   type="button"
                   onClick={() => setMobileFiltersOpen((v) => !v)}
@@ -1129,7 +1184,7 @@ export default function Services() {
             </div>
           </div>
 
-          {/* ✅ mobile filters panel */}
+          {/* mobile filters panel */}
           {mobileFiltersOpen ? (
             <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
               <div className="flex items-center justify-between">
@@ -1207,7 +1262,7 @@ export default function Services() {
         </GlassCard>
       ) : null}
 
-      {/* list */}
+      {/* list/grid */}
       {loading ? (
         <div className={cn(view === "list" ? "space-y-3" : "masonry")}>
           {Array.from({ length: 12 }).map((_, i) => (
@@ -1217,15 +1272,11 @@ export default function Services() {
           ))}
         </div>
       ) : err ? (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">
-          {err}
-        </div>
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">{err}</div>
       ) : filtered.length === 0 ? (
         <GlassCard className="p-6">
           <div className="text-white font-semibold">No services found</div>
-          <div className="mt-1 text-sm text-zinc-200/70">
-            Try changing platform/category, price range or clearing search.
-          </div>
+          <div className="mt-1 text-sm text-zinc-200/70">Try changing platform/category, price range or clearing search.</div>
           <button
             type="button"
             onClick={resetFilters}
@@ -1270,9 +1321,7 @@ export default function Services() {
           )}
 
           <div className="flex items-center justify-between">
-            <div className="text-xs text-zinc-200/60">
-              Featured = pinned → connected → best price → clean naming. Pure SaaS.
-            </div>
+            <div className="text-xs text-zinc-200/60">Featured = pinned → connected → best price → clean naming. Pure SaaS.</div>
 
             <div className="flex items-center gap-2">
               <button
