@@ -665,80 +665,6 @@ function useTopbarOffset(extra = 12) {
   return top;
 }
 
-/* ------------------------------ LOCKED controls bar (FIXED, no drifting) ------------------------------ */
-/**
- * Works even without AppLayout changes:
- * - tries #app-main
- * - fallback to closest container inside layout (main or ".mx-auto..." wrapper)
- */
-function useLockedBarInMain(topPx) {
-  const barRef = useRef(null);
-  const [state, setState] = useState({ style: null, h: 0 });
-
-  useEffect(() => {
-    let raf = 0;
-    let roMain = null;
-    let roBar = null;
-
-    const pickMain = () => {
-      return (
-        document.getElementById("app-main") ||
-        document.querySelector("main") ||
-        document.querySelector(".mx-auto.w-full") ||
-        document.querySelector("#root")
-      );
-    };
-
-    const measure = () => {
-      const main = pickMain();
-      const bar = barRef.current;
-      if (!main || !bar) return;
-
-      const r = main.getBoundingClientRect();
-      const h = Math.round(bar.getBoundingClientRect().height);
-
-      setState({
-        h,
-        style: {
-          position: "fixed",
-          top: `${topPx}px`,
-          left: `${Math.round(r.left)}px`,
-          width: `${Math.round(r.width)}px`,
-          zIndex: 60,
-        },
-      });
-    };
-
-    const schedule = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(measure);
-    };
-
-    schedule();
-    window.addEventListener("resize", schedule);
-
-    const main = pickMain();
-    if (main && "ResizeObserver" in window) {
-      roMain = new ResizeObserver(schedule);
-      roMain.observe(main);
-    }
-
-    if ("ResizeObserver" in window && barRef.current) {
-      roBar = new ResizeObserver(schedule);
-      roBar.observe(barRef.current);
-    }
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", schedule);
-      if (roMain) roMain.disconnect();
-      if (roBar) roBar.disconnect();
-    };
-  }, [topPx]);
-
-  return { barRef, style: state.style, height: state.h };
-}
-
 /* ------------------------------ Main page ------------------------------ */
 
 export default function Services() {
@@ -748,8 +674,8 @@ export default function Services() {
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  const topbarTop = useTopbarOffset(12);
-  const locked = useLockedBarInMain(topbarTop);
+  // this is the sticky "top" so it sits under your app topbar
+  const stickyTop = useTopbarOffset(12);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1101,17 +1027,22 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* Spacer ONLY equals the bar height. No extra. No gap. */}
-      {locked.height ? <div style={{ height: locked.height }} /> : null}
-
-      {/* LOCKED CONTROLS BAR */}
-      <div style={locked.style || {}} className="px-4 md:px-6">
-        {/* Underlay (gives the “background” back) */}
-        <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/80 backdrop-blur-xl" />
-        <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-b from-zinc-950/95 to-transparent" />
+      {/* ✅ STICKY CONTROLS (this is the fix) */}
+      <div
+        className="sticky z-[70] px-4 md:px-6"
+        style={{
+          top: stickyTop,
+          // helps Safari/iOS not to “bleach” sticky layers
+          WebkitTransform: "translateZ(0)",
+          transform: "translateZ(0)",
+        }}
+      >
+        {/* underlay so background stays like “fixed” bar */}
+        <div className="pointer-events-none absolute inset-x-0 -top-3 bottom-0 rounded-2xl bg-zinc-950/80 backdrop-blur-xl" />
+        <div className="pointer-events-none absolute inset-x-0 -top-3 h-3 bg-gradient-to-b from-zinc-950/95 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
-        <div ref={locked.barRef} className="relative">
+        <div className="relative">
           <GlassCard className="bg-zinc-950/55 p-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
