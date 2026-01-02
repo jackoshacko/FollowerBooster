@@ -176,10 +176,7 @@ export default function Topbar() {
     setFocusSearch(false);
   }, [focusSearch]);
 
-  const userLabel = useMemo(
-    () => me?.email || me?.username || me?.name || "User",
-    [me]
-  );
+  const userLabel = useMemo(() => me?.email || me?.username || me?.name || "User", [me]);
   const initials = useMemo(() => initialsFromMe(me), [me]);
 
   function go(pathInApp, fallbackPublic = "/") {
@@ -203,16 +200,20 @@ export default function Topbar() {
     if (s.startsWith("wal")) return nav(to("/app/wallet", "/login"));
     if (s.startsWith("ord")) return nav(to("/app/orders", "/login"));
     if (s.startsWith("ser")) return nav(to("/app/services", "/services"));
-    if (s.startsWith("cre") || s.startsWith("buy"))
-      return nav(to("/app/create-order", "/login"));
+    if (s.startsWith("cre") || s.startsWith("buy")) return nav(to("/app/create-order", "/login"));
     if (s.startsWith("dash")) return nav(to("/app/dashboard", "/login"));
     if (s.startsWith("adm") && isAdmin) return nav("/app/admin/dashboard");
   }
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full overflow-x-clip">
-        <div className="border-b border-white/10 bg-black/35 backdrop-blur-xl">
+      {/* ✅ FIX: add id + data-topbar so Services.jsx can measure topbar height */}
+      <header
+        id="app-topbar"
+        data-topbar="app"
+        className="sticky top-0 z-40 w-full overflow-x-clip"
+      >
+        <div className="relative border-b border-white/10 bg-black/35 backdrop-blur-xl">
           <div className="h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <div className="h-px w-full bg-gradient-to-r from-transparent via-purple-300/20 to-transparent" />
 
@@ -356,9 +357,7 @@ export default function Topbar() {
                   </div>
 
                   <div className="hidden md:block leading-tight max-w-[180px]">
-                    <div className="text-xs font-semibold text-zinc-100 truncate">
-                      {userLabel}
-                    </div>
+                    <div className="text-xs font-semibold text-zinc-100 truncate">{userLabel}</div>
                     <div className="mt-0.5">
                       <RolePill role={me?.role} />
                     </div>
