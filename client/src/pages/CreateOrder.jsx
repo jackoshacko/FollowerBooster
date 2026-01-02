@@ -442,8 +442,7 @@ function ServicePickerModal({
                       </Badge>
                     </div>
                     <div className="mt-1 text-sm text-zinc-200/70">
-                      Search → pin favorites → choose. Nema više belog dropdowna.
-                    </div>
+                      Search → pin favorites → choose.                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
