@@ -27,13 +27,6 @@ import {
   Filter,
 } from "lucide-react";
 
-/**
- * IMPORTANT (1x change outside this file):
- * - AppLayout main container MUST have: <main id="app-main">...</main>
- * - Topbar wrapper should have id="app-topbar" OR data-topbar="app"
- * This makes the controls bar perfectly locked under topbar on any layout.
- */
-
 /* ------------------------------ labels ------------------------------ */
 
 const PLATFORM_LABEL = {
@@ -57,25 +50,20 @@ const PLATFORM_LABEL = {
 function cn(...a) {
   return a.filter(Boolean).join(" ");
 }
-
 function toLc(v) {
   return String(v || "").trim().toLowerCase();
 }
-
 function platformToLabel(p) {
   const key = toLc(p);
   return PLATFORM_LABEL[key] || "Other";
 }
-
 function safeNum(n, fallback = 0) {
   const x = Number(n);
   return Number.isFinite(x) ? x : fallback;
 }
-
 function money2(n) {
   return (Math.round(safeNum(n, 0) * 100) / 100).toFixed(2);
 }
-
 function fmtInt(n) {
   const v = Math.round(safeNum(n, 0));
   try {
@@ -629,7 +617,6 @@ function loadFavs() {
     return new Set();
   }
 }
-
 function saveFavs(set) {
   try {
     localStorage.setItem(FAV_KEY, JSON.stringify(Array.from(set)));
@@ -637,19 +624,15 @@ function saveFavs(set) {
 }
 
 /* ------------------------------ Topbar offset ------------------------------ */
-/**
- * Measures ONLY real topbar.
- * Requirement: Topbar wrapper must have id="app-topbar" OR data-topbar="app".
- */
+
 function useTopbarOffset(extra = 12) {
   const [top, setTop] = useState(extra);
 
   useEffect(() => {
     let raf = 0;
 
-    const pickTopbar = () => {
-      return document.getElementById("app-topbar") || document.querySelector('[data-topbar="app"]');
-    };
+    const pickTopbar = () =>
+      document.getElementById("app-topbar") || document.querySelector('[data-topbar="app"]');
 
     const measure = () => {
       const el = pickTopbar();
@@ -668,7 +651,7 @@ function useTopbarOffset(extra = 12) {
     const el = pickTopbar();
     let ro = null;
     if (el && "ResizeObserver" in window) {
-      ro = new ResizeObserver(() => onResize());
+      ro = new ResizeObserver(onResize);
       ro.observe(el);
     }
 
@@ -684,8 +667,9 @@ function useTopbarOffset(extra = 12) {
 
 /* ------------------------------ LOCKED controls bar (FIXED, no drifting) ------------------------------ */
 /**
- * Locks a bar under topbar and aligns it to #app-main width/left.
- * NO scroll listeners. Only resize/RO => no "plivanje".
+ * Works even without AppLayout changes:
+ * - tries #app-main
+ * - fallback to closest container inside layout (main or ".mx-auto..." wrapper)
  */
 function useLockedBarInMain(topPx) {
   const barRef = useRef(null);
@@ -696,7 +680,14 @@ function useLockedBarInMain(topPx) {
     let roMain = null;
     let roBar = null;
 
-    const pickMain = () => document.getElementById("app-main") || document.querySelector("main");
+    const pickMain = () => {
+      return (
+        document.getElementById("app-main") ||
+        document.querySelector("main") ||
+        document.querySelector(".mx-auto.w-full") ||
+        document.querySelector("#root")
+      );
+    };
 
     const measure = () => {
       const main = pickMain();
@@ -713,7 +704,7 @@ function useLockedBarInMain(topPx) {
           top: `${topPx}px`,
           left: `${Math.round(r.left)}px`,
           width: `${Math.round(r.width)}px`,
-          zIndex: 50,
+          zIndex: 60,
         },
       });
     };
@@ -754,21 +745,16 @@ export default function Services() {
   const nav = useNavigate();
   const loc = useLocation();
 
-  // ✅ base path: radi i na /services i na /app/services
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  // ✅ sticky/fixed top under Topbar
-  const stickyTop = useTopbarOffset(12);
-
-  // ✅ locked bar under topbar, aligned to app-main
-  const locked = useLockedBarInMain(stickyTop);
+  const topbarTop = useTopbarOffset(12);
+  const locked = useLockedBarInMain(topbarTop);
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // UI state
   const [platform, setPlatform] = useState("Instagram");
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
@@ -827,7 +813,7 @@ export default function Services() {
       setLoading(true);
       setErr("");
       try {
-        const res = await api.servicesPublic(); // public-safe endpoint
+        const res = await api.servicesPublic();
         const list = Array.isArray(res) ? res : res?.services || [];
         const norm = list.map(normalizeService).filter((x) => x._id && x.enabled !== false);
         if (mounted) setItems(norm);
@@ -856,7 +842,7 @@ export default function Services() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // keep as-is
+  }, []);
 
   const categories = useMemo(() => {
     const set = new Set();
@@ -976,12 +962,10 @@ export default function Services() {
   function buyNow(s) {
     nav(to(`/create-order?serviceId=${encodeURIComponent(s._id)}`));
   }
-
   function openDetails(s) {
     setActiveService(s);
     setDetailsOpen(true);
   }
-
   function resetFilters() {
     setQ("");
     setCat("all");
@@ -1004,7 +988,7 @@ export default function Services() {
 
       {/* toast */}
       {toast ? (
-        <div className="fixed right-4 top-4 z-50 rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
+        <div className="fixed right-4 top-4 z-[80] rounded-2xl border border-white/10 bg-black/60 px-4 py-2 text-sm text-zinc-100 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]">
           {toast}
         </div>
       ) : null}
@@ -1064,7 +1048,6 @@ export default function Services() {
             </div>
           </div>
 
-          {/* no <a href> (no reload), respects /app */}
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <button
               type="button"
@@ -1118,12 +1101,13 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ LOCKED CONTROLS: stays under topbar, never scrolls away */}
-      {locked.height ? <div style={{ height: locked.height + 12 }} /> : null}
+      {/* Spacer ONLY equals the bar height. No extra. No gap. */}
+      {locked.height ? <div style={{ height: locked.height }} /> : null}
 
+      {/* LOCKED CONTROLS BAR */}
       <div style={locked.style || {}} className="px-4 md:px-6">
-        {/* Underlay that seals the content below (no floating look) */}
-        <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/85 backdrop-blur-xl" />
+        {/* Underlay (gives the “background” back) */}
+        <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/80 backdrop-blur-xl" />
         <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-b from-zinc-950/95 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
@@ -1156,7 +1140,6 @@ export default function Services() {
                     <SlidersHorizontal className="h-4 w-4" /> Control
                   </span>
 
-                  {/* mobile filters toggle */}
                   <button
                     type="button"
                     onClick={() => setMobileFiltersOpen((v) => !v)}
@@ -1211,7 +1194,6 @@ export default function Services() {
                     Connected
                   </button>
 
-                  {/* desktop price range */}
                   <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
                     <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                     <Range
@@ -1255,7 +1237,6 @@ export default function Services() {
               </div>
             </div>
 
-            {/* mobile filters panel */}
             {mobileFiltersOpen ? (
               <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
                 <div className="flex items-center justify-between">
