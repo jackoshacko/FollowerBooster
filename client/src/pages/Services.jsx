@@ -674,7 +674,6 @@ export default function Services() {
   const base = loc.pathname.startsWith("/app") ? "/app" : "";
   const to = (p) => (p.startsWith("/") ? `${base}${p}` : `${base}/${p}`);
 
-  // this is the sticky "top" so it sits under your app topbar
   const stickyTop = useTopbarOffset(12);
 
   const [items, setItems] = useState([]);
@@ -1027,17 +1026,12 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ STICKY CONTROLS (this is the fix) */}
+      {/* ✅ STICKY CONTROLS — FIXED */}
       <div
-        className="sticky z-[70] px-4 md:px-6"
-        style={{
-          top: stickyTop,
-          // helps Safari/iOS not to “bleach” sticky layers
-          WebkitTransform: "translateZ(0)",
-          transform: "translateZ(0)",
-        }}
+        className="sticky z-[70] px-4 md:px-6 relative isolate"
+        style={{ top: stickyTop }}
       >
-        {/* underlay so background stays like “fixed” bar */}
+        {/* underlay stays INSIDE sticky wrapper now */}
         <div className="pointer-events-none absolute inset-x-0 -top-3 bottom-0 rounded-2xl bg-zinc-950/80 backdrop-blur-xl" />
         <div className="pointer-events-none absolute inset-x-0 -top-3 h-3 bg-gradient-to-b from-zinc-950/95 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
