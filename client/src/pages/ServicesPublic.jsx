@@ -134,24 +134,18 @@ function SmartSticky({ topOffset = 64, children }) {
     const wrap = wrapRef.current;
     if (!wrap) return;
 
-    // When the wrapper's top goes above topOffset => stick
     const top = wrap.getBoundingClientRect().top;
     const shouldStick = top <= topOffset;
 
-    // Avoid re-render spam
     setStuck((prev) => (prev === shouldStick ? prev : shouldStick));
 
-    if (shouldStick) {
-      // while stuck, keep width/left synced (responsive)
-      measure();
-    }
+    if (shouldStick) measure();
   };
 
   useLayoutEffect(() => {
     measure();
     onScroll();
 
-    // Capture scroll on window (works even if page uses weird wrappers)
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", measure);
 
@@ -162,14 +156,12 @@ function SmartSticky({ topOffset = 64, children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topOffset]);
 
-  // Update height if children changes (filters wrapping etc.)
   useLayoutEffect(() => {
     measure();
   });
 
   return (
     <div ref={wrapRef} className="relative">
-      {/* placeholder so content doesn't jump */}
       {stuck ? <div style={{ height: barH }} /> : null}
 
       <div
@@ -257,6 +249,7 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
               onClick={onClose}
               className="shrink-0 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-white/90 hover:bg-white/10 hover:border-white/20 transition"
               title="Close"
+              type="button"
             >
               ✕
             </button>
@@ -303,6 +296,7 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
                   <button
                     onClick={() => onBuy?.(id)}
                     className="rounded-2xl px-4 py-2 text-sm font-semibold bg-white text-zinc-900 hover:bg-zinc-200 transition active:scale-[0.99]"
+                    type="button"
                   >
                     Login to buy
                   </button>
@@ -311,6 +305,7 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
                 <button
                   onClick={() => onBuy?.(id)}
                   className="rounded-2xl px-5 py-2.5 text-sm font-semibold bg-white text-zinc-900 hover:bg-zinc-200 transition active:scale-[0.99]"
+                  type="button"
                 >
                   Buy now
                 </button>
@@ -325,6 +320,11 @@ function ServiceModal({ open, onClose, s, authed, onBuy }) {
       </div>
     </div>
   );
+}
+
+function isProbablyMobile() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
 }
 
 export default function ServicesPublic() {
@@ -345,8 +345,30 @@ export default function ServicesPublic() {
   const [selected, setSelected] = useState(null);
   const [openModal, setOpenModal] = useState(false);
 
-  // ✅ offset is height of your topbar; tries CSS var, otherwise 64
   const [topOffset, setTopOffset] = useState(64);
+
+  // ✅ Load more
+  const [isMobile, setIsMobile] = useState(() => isProbablyMobile());
+  const INITIAL = isMobile ? 24 : 36;
+  const STEP = isMobile ? 24 : 36;
+  const [visibleCount, setVisibleCount] = useState(INITIAL);
+
+  // track mobile changes on resize
+  useEffect(() => {
+    const onResize = () => {
+      const m = isProbablyMobile();
+      setIsMobile(m);
+    };
+    window.addEventListener("resize", onResize, { passive: true });
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // when mobile/desktop changes, reset visible safely
+  useEffect(() => {
+    const init = isMobile ? 24 : 36;
+    setVisibleCount((v) => Math.max(init, Math.min(v, 500))); // keep sane cap
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
 
   useEffect(() => {
     const read = () => {
@@ -412,7 +434,9 @@ export default function ServicesPublic() {
   }, [list]);
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    // ✅ hardening/perf: limit query length so nobody freezes UI
+    const needle = q.trim().slice(0, 80).toLowerCase();
+
     let arr = list.slice();
 
     if (platform !== "all") {
@@ -442,6 +466,15 @@ export default function ServicesPublic() {
 
     return arr;
   }, [list, q, platform, category, sort, onlyInStock]);
+
+  // ✅ whenever filters change, reset visible count (so it feels snappy)
+  useEffect(() => {
+    setVisibleCount(isMobile ? 24 : 36);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, platform, category, sort, onlyInStock, isMobile]);
+
+  const shown = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const canLoadMore = shown.length < filtered.length;
 
   const kpis = useMemo(() => {
     const setP = new Set();
@@ -485,7 +518,11 @@ export default function ServicesPublic() {
             <div className="flex flex-wrap items-center gap-2">
               <Pill tone="violet">2050</Pill>
               <Pill tone="info">Public Services Catalog</Pill>
-              {!authed ? <Pill tone="warn">Guests can browse • Login to order</Pill> : <Pill tone="ok">Authenticated</Pill>}
+              {!authed ? (
+                <Pill tone="warn">Guests can browse • Login to order</Pill>
+              ) : (
+                <Pill tone="ok">Authenticated</Pill>
+              )}
             </div>
 
             <h1 className="mt-3 text-2xl md:text-4xl font-black tracking-tight text-white">Services</h1>
@@ -499,12 +536,14 @@ export default function ServicesPublic() {
             <button
               onClick={() => nav("/register")}
               className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition"
+              type="button"
             >
               Create account
             </button>
             <button
               onClick={() => nav("/login")}
               className="rounded-2xl px-4 py-2 text-sm font-semibold bg-white text-zinc-900 hover:bg-zinc-200 transition active:scale-[0.99]"
+              type="button"
             >
               Sign in
             </button>
@@ -535,6 +574,7 @@ export default function ServicesPublic() {
                       ? "border-white/20 bg-white/10 text-white shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_20px_60px_rgba(168,85,247,0.18)]"
                       : "border-white/10 bg-white/5 text-white/85 hover:bg-white/10 hover:border-white/20"
                   )}
+                  type="button"
                 >
                   {t === "all" ? "All" : t}
                 </button>
@@ -546,7 +586,7 @@ export default function ServicesPublic() {
         </div>
       </div>
 
-      {/* ✅ THIS is the fix: SmartSticky (fixed when needed) */}
+      {/* FILTER BAR */}
       <SmartSticky topOffset={topOffset}>
         <div className={filterShell}>
           <div className="p-3 md:p-4">
@@ -554,7 +594,11 @@ export default function ServicesPublic() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap">
                 <input
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onChange={(e) => {
+                    // ✅ safety/perf: cap length
+                    const v = String(e.target.value || "").slice(0, 80);
+                    setQ(v);
+                  }}
                   placeholder="Search name, type, category, description…"
                   className={cls(
                     "w-full sm:w-[360px] rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white",
@@ -592,10 +636,18 @@ export default function ServicesPublic() {
                   onChange={(e) => setSort(e.target.value)}
                   className="w-full sm:w-[190px] rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white backdrop-blur-xl"
                 >
-                  <option value="pop" className="bg-zinc-900">Sort</option>
-                  <option value="nameAsc" className="bg-zinc-900">Name A–Z</option>
-                  <option value="priceAsc" className="bg-zinc-900">Price ↑</option>
-                  <option value="priceDesc" className="bg-zinc-900">Price ↓</option>
+                  <option value="pop" className="bg-zinc-900">
+                    Sort
+                  </option>
+                  <option value="nameAsc" className="bg-zinc-900">
+                    Name A–Z
+                  </option>
+                  <option value="priceAsc" className="bg-zinc-900">
+                    Price ↑
+                  </option>
+                  <option value="priceDesc" className="bg-zinc-900">
+                    Price ↓
+                  </option>
                 </select>
 
                 <button
@@ -614,8 +666,8 @@ export default function ServicesPublic() {
 
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs text-zinc-300/70">
-                  Showing <span className="text-white/90 font-semibold">{filtered.length}</span> of{" "}
-                  <span className="text-white/90 font-semibold">{list.length}</span>
+                  Showing <span className="text-white/90 font-semibold">{shown.length}</span> of{" "}
+                  <span className="text-white/90 font-semibold">{filtered.length}</span>
                 </div>
 
                 <button
@@ -625,8 +677,10 @@ export default function ServicesPublic() {
                     setCategory("all");
                     setSort("pop");
                     setOnlyInStock(false);
+                    setVisibleCount(isMobile ? 24 : 36);
                   }}
                   className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20 transition"
+                  type="button"
                 >
                   Reset
                 </button>
@@ -652,93 +706,118 @@ export default function ServicesPublic() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((s) => {
-              const id = s?._id || s?.id;
-              const cur = s?.currency || "EUR";
-              const price = s?.pricePer1000 ?? s?.price ?? 0;
+          <>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {shown.map((s, idx) => {
+                const id = s?._id || s?.id;
+                const cur = s?.currency || "EUR";
+                const price = s?.pricePer1000 ?? s?.price ?? 0;
 
-              const enabled = s?.enabled !== false;
-              const disabled = !id || !enabled;
+                const enabled = s?.enabled !== false;
+                const disabled = !id || !enabled;
 
-              const highlight = focusId && id && String(id) === String(focusId);
+                const highlight = focusId && id && String(id) === String(focusId);
 
-              return (
-                <div
-                  key={id || `${s?.name || "service"}-${Math.random()}`}
+                // ✅ stable key fallback (never Math.random)
+                const key = id ? String(id) : `${String(s?.name || "service")}-${String(s?.platform || "")}-${idx}`;
+
+                return (
+                  <div
+                    key={key}
+                    className={cls(
+                      "group rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl",
+                      "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_55px_rgba(168,85,247,0.12)]",
+                      "hover:border-white/15 hover:bg-white/7 transition",
+                      disabled && "opacity-70",
+                      highlight &&
+                        "border-white/25 bg-white/8 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_25px_85px_rgba(168,85,247,0.22)]"
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="text-sm font-black text-white truncate">{s?.name || "Service"}</div>
+                          {!enabled ? <Badge tone="red">Disabled</Badge> : null}
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {s?.platform ? <Pill>{s.platform}</Pill> : null}
+                          {s?.type ? <Pill>{s.type}</Pill> : null}
+                          {s?.category ? <Pill>{s.category}</Pill> : null}
+                          <Pill tone={enabled ? "ok" : "bad"}>per 1k</Pill>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">Price / 1k</div>
+                        <div className="mt-1 text-xl font-black tracking-tight text-white">{fmtMoney(price, cur)}</div>
+                      </div>
+                    </div>
+
+                    {s?.min != null || s?.max != null ? (
+                      <div className="mt-3 text-xs text-zinc-200/70">
+                        Min: <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span> • Max:{" "}
+                        <span className="text-white/90 font-semibold">{s?.max ?? "—"}</span>
+                      </div>
+                    ) : null}
+
+                    {s?.description ? (
+                      <p className="mt-3 text-sm text-zinc-200/75 leading-relaxed line-clamp-3">{s.description}</p>
+                    ) : (
+                      <p className="mt-3 text-sm text-zinc-200/60 leading-relaxed">
+                        Premium catalog item. Open details for full specs.
+                      </p>
+                    )}
+
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => openDetails(s)}
+                        className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-black/20 hover:bg-black/30 hover:border-white/20 transition"
+                        type="button"
+                      >
+                        Details
+                      </button>
+
+                      <button
+                        disabled={!id}
+                        onClick={() => onBuy(id)}
+                        className={cls(
+                          "rounded-2xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]",
+                          !authed
+                            ? "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90 hover:border-white/20"
+                            : "bg-white text-zinc-900 hover:bg-zinc-200",
+                          !id && "opacity-50 cursor-not-allowed"
+                        )}
+                        type="button"
+                      >
+                        {!authed ? "Login to buy" : "Buy"}
+                      </button>
+                    </div>
+
+                    <div className="pointer-events-none mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent opacity-0 group-hover:opacity-100 transition" />
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ✅ LOAD MORE */}
+            <div className="mt-6 flex items-center justify-center">
+              {canLoadMore ? (
+                <button
+                  onClick={() => setVisibleCount((v) => Math.min(filtered.length, v + STEP))}
                   className={cls(
-                    "group rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl",
-                    "shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_18px_55px_rgba(168,85,247,0.12)]",
-                    "hover:border-white/15 hover:bg-white/7 transition",
-                    disabled && "opacity-70",
-                    highlight &&
-                      "border-white/25 bg-white/8 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_25px_85px_rgba(168,85,247,0.22)]"
+                    "rounded-2xl px-6 py-3 text-sm font-semibold border border-white/10 bg-white/5 text-white/90",
+                    "hover:bg-white/10 hover:border-white/20 transition active:scale-[0.99]"
                   )}
+                  type="button"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="text-sm font-black text-white truncate">{s?.name || "Service"}</div>
-                        {!enabled ? <Badge tone="red">Disabled</Badge> : null}
-                      </div>
-
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {s?.platform ? <Pill>{s.platform}</Pill> : null}
-                        {s?.type ? <Pill>{s.type}</Pill> : null}
-                        {s?.category ? <Pill>{s.category}</Pill> : null}
-                        <Pill tone={enabled ? "ok" : "bad"}>per 1k</Pill>
-                      </div>
-                    </div>
-
-                    <div className="shrink-0 text-right">
-                      <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-300/70">Price / 1k</div>
-                      <div className="mt-1 text-xl font-black tracking-tight text-white">{fmtMoney(price, cur)}</div>
-                    </div>
-                  </div>
-
-                  {s?.min != null || s?.max != null ? (
-                    <div className="mt-3 text-xs text-zinc-200/70">
-                      Min: <span className="text-white/90 font-semibold">{s?.min ?? "—"}</span> • Max:{" "}
-                      <span className="text-white/90 font-semibold">{s?.max ?? "—"}</span>
-                    </div>
-                  ) : null}
-
-                  {s?.description ? (
-                    <p className="mt-3 text-sm text-zinc-200/75 leading-relaxed line-clamp-3">{s.description}</p>
-                  ) : (
-                    <p className="mt-3 text-sm text-zinc-200/60 leading-relaxed">
-                      Premium catalog item. Open details for full specs.
-                    </p>
-                  )}
-
-                  <div className="mt-4 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => openDetails(s)}
-                      className="rounded-2xl px-4 py-2 text-sm font-semibold border border-white/10 bg-black/20 hover:bg-black/30 hover:border-white/20 transition"
-                    >
-                      Details
-                    </button>
-
-                    <button
-                      disabled={!id}
-                      onClick={() => onBuy(id)}
-                      className={cls(
-                        "rounded-2xl px-4 py-2 text-sm font-semibold transition active:scale-[0.99]",
-                        !authed
-                          ? "border border-white/10 bg-white/5 hover:bg-white/10 text-white/90 hover:border-white/20"
-                          : "bg-white text-zinc-900 hover:bg-zinc-200",
-                        !id && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      {!authed ? "Login to buy" : "Buy"}
-                    </button>
-                  </div>
-
-                  <div className="pointer-events-none mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/15 to-transparent opacity-0 group-hover:opacity-100 transition" />
-                </div>
-              );
-            })}
-          </div>
+                  Load more ({shown.length}/{filtered.length})
+                </button>
+              ) : (
+                <div className="text-xs text-zinc-300/60">All results loaded.</div>
+              )}
+            </div>
+          </>
         )}
 
         <ServiceModal
