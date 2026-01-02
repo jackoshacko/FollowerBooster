@@ -10,7 +10,6 @@ export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const loc = useLocation();
 
-  // hard reset: ako je nekad ostao body lock (drawer/modal), vrati ga čim layout mounta
   useEffect(() => {
     const body = document.body;
     const html = document.documentElement;
@@ -26,13 +25,12 @@ export default function AppLayout() {
     if (body.dataset) body.dataset.scrollY = "";
   }, []);
 
-  // kad promeniš stranicu -> zatvori drawer
   useEffect(() => {
     setMobileOpen(false);
   }, [loc.pathname]);
 
   return (
-    <div className="h-[100dvh] w-full overflow-hidden bg-zinc-950 text-zinc-100">
+    <div className="min-h-[100dvh] w-full overflow-x-clip bg-zinc-950 text-zinc-100">
       {/* background FIXED */}
       <div className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-zinc-950" />
@@ -47,9 +45,9 @@ export default function AppLayout() {
         <div className="absolute -bottom-40 -right-40 h-[520px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl" />
       </div>
 
-      <div className="relative z-10 flex h-[100dvh] w-full overflow-hidden">
+      <div className="relative z-10 flex min-h-[100dvh] w-full overflow-x-clip">
         {/* Desktop sidebar */}
-        <aside className="hidden md:block shrink-0">
+        <aside className="hidden md:block">
           <Sidebar />
         </aside>
 
@@ -57,26 +55,24 @@ export default function AppLayout() {
         <SidebarDrawer open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
         {/* MAIN */}
-        <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Topbar sticky */}
-          <div className="sticky top-0 z-40" id="app-topbar" data-topbar="app">
+        <div className="relative flex min-h-[100dvh] min-w-0 flex-1 flex-col overflow-x-clip">
+          {/* IMPORTANT: give Topbar a stable measuring hook */}
+          <div id="app-topbar" className="sticky top-0 z-40">
             <Topbar onOpenSidebar={() => setMobileOpen(true)} />
           </div>
 
-          {/* ✅ SCROLL CONTAINER (umesto window scroll) */}
-          <div className="min-w-0 flex-1 overflow-y-auto overflow-x-clip overscroll-contain">
-            <main
-              className={[
-                "mx-auto w-full min-w-0 max-w-[1200px] 2xl:max-w-[1400px]",
-                "px-4 py-4 md:px-6 md:py-6",
-                "pb-[calc(env(safe-area-inset-bottom)+24px)]",
-              ].join(" ")}
-            >
-              <Outlet />
-            </main>
-
-            <CookieNotice />
+          {/* FULL-BLEED content area (no max-w here!) */}
+          <div className="min-w-0 flex-1 overflow-x-clip">
+            {/* Page controls can be full-bleed now */}
+            <div className="w-full">
+              {/* Provide a centered container helper for pages that want it */}
+              <div className="mx-auto w-full max-w-[1200px] 2xl:max-w-[1400px] px-4 py-4 md:px-6 md:py-6 pb-[calc(env(safe-area-inset-bottom)+24px)]">
+                <Outlet />
+              </div>
+            </div>
           </div>
+
+          <CookieNotice />
         </div>
       </div>
     </div>
