@@ -69,6 +69,15 @@ function money2(n) {
   return (Math.round(safeNum(n, 0) * 100) / 100).toFixed(2);
 }
 
+function fmtInt(n) {
+  const v = Math.round(safeNum(n, 0));
+  try {
+    return new Intl.NumberFormat(undefined).format(v);
+  } catch {
+    return String(v);
+  }
+}
+
 async function copyText(s) {
   const text = String(s ?? "");
   try {
@@ -174,7 +183,7 @@ function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="text-xs text-zinc-200/70 w-12">{money2(vMin)}€</div>
+      <div className="w-12 text-xs text-zinc-200/70">{money2(vMin)}€</div>
       <input
         type="range"
         min={min}
@@ -191,7 +200,7 @@ function Range({ min = 0, max = 100, valueMin, valueMax, onChange }) {
         onChange={(e) => onChange({ min: vMin, max: Number(e.target.value) })}
         className="w-28"
       />
-      <div className="text-xs text-zinc-200/70 w-12 text-right">{money2(vMax)}€</div>
+      <div className="w-12 text-right text-xs text-zinc-200/70">{money2(vMax)}€</div>
     </div>
   );
 }
@@ -270,7 +279,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <div className="text-xl font-black tracking-tight text-white">{s.name || "Service"}</div>
+                <div className="truncate text-xl font-black tracking-tight text-white">{s.name || "Service"}</div>
                 <Badge tone="violet">{s.platform || "Other"}</Badge>
               </div>
 
@@ -355,7 +364,7 @@ function ServiceModal({ open, onClose, service, onBuy, toast, isFav, toggleFav }
                   )}
                 </Badge>
               </div>
-              <div className="text-xs text-zinc-200/60 mt-2">ready for ordering</div>
+              <div className="mt-2 text-xs text-zinc-200/60">ready for ordering</div>
             </div>
           </div>
 
@@ -501,7 +510,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
   }
 
   return (
-    <GlassCard className="p-4 group">
+    <GlassCard className="group p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="violet">{s.platform}</Badge>
@@ -594,7 +603,7 @@ function ServiceCard({ s, view, onBuy, onDetails, toast, isFav, toggleFav }) {
       </div>
 
       <div className="mt-3 hidden text-xs text-zinc-200/50 group-hover:block">
-        Featured ranks connected services first. Perfect for scaling.
+        Featured ranks pinned services first. Perfect for scaling.
       </div>
     </GlassCard>
   );
@@ -915,6 +924,10 @@ export default function Services() {
         @media (min-width: 768px){ .masonry{ column-count: 2; } }
         @media (min-width: 1024px){ .masonry{ column-count: 3; } }
         @media (min-width: 1536px){ .masonry{ column-count: 4; } }
+
+        /* Safety: if some parent uses transform, sticky can break.
+           Nothing here changes layout, but helps avoid "tiny gaps" on iOS. */
+        .sticky-surface { transform: translateZ(0); }
       `}</style>
 
       {/* toast */}
@@ -1033,26 +1046,25 @@ export default function Services() {
         </div>
       </GlassCard>
 
-      {/* ✅ CONTROLS (TRUE sticky + SOLID underlay glued to bg) */}
+      {/* ✅ CONTROLS (TRUE sticky, no fixed-left/width hack, no dragging) */}
       <div
         className={cn(
-          "sticky z-30",
-          // full-bleed so it touches background edge-to-edge (no gap on mobile)
+          "sticky z-30 sticky-surface",
+          // full-bleed inside page padding so it “touches” background (no side gaps)
           "-mx-4 md:-mx-6",
-          "px-4 md:px-6",
-          "pt-0"
+          "px-4 md:px-6"
         )}
         style={{ top: `${stickyTop}px` }}
       >
-        {/* Underlay that seals the content below (no “floating”) */}
+        {/* Underlay that seals the content below (no “floating” look) */}
         <div className="pointer-events-none absolute inset-x-0 -top-6 bottom-0 bg-zinc-950/85 backdrop-blur-xl" />
-        {/* Soft fade on top so it blends into the topbar */}
+        {/* Soft fade into topbar */}
         <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-gradient-to-b from-zinc-950/95 to-transparent" />
-        {/* Small shadow line so it feels attached */}
+        {/* Small shadow line */}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-white/10" />
 
         <div className="relative">
-          <GlassCard className="p-4 bg-zinc-950/55">
+          <GlassCard className="bg-zinc-950/55 p-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex w-full flex-col gap-2 xl:flex-row xl:items-center">
                 <div className="relative w-full xl:w-[380px]">
@@ -1084,7 +1096,7 @@ export default function Services() {
                   <button
                     type="button"
                     onClick={() => setMobileFiltersOpen((v) => !v)}
-                    className="xl:hidden inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-zinc-100 hover:bg-white/10 xl:hidden"
                   >
                     <Filter className="h-4 w-4" /> Filters
                   </button>
@@ -1136,7 +1148,7 @@ export default function Services() {
                   </button>
 
                   {/* desktop price range */}
-                  <div className="hidden xl:flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                  <div className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5 xl:flex">
                     <ArrowUpDown className="h-4 w-4 text-zinc-100/70" />
                     <Range
                       min={0}
@@ -1181,7 +1193,7 @@ export default function Services() {
 
             {/* mobile filters panel */}
             {mobileFiltersOpen ? (
-              <div className="xl:hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 xl:hidden">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold text-white">Price range</div>
                   <button
@@ -1271,7 +1283,7 @@ export default function Services() {
         <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-100">{err}</div>
       ) : filtered.length === 0 ? (
         <GlassCard className="p-6">
-          <div className="text-white font-semibold">No services found</div>
+          <div className="font-semibold text-white">No services found</div>
           <div className="mt-1 text-sm text-zinc-200/70">
             Try changing platform/category, price range or clearing search.
           </div>
@@ -1367,13 +1379,4 @@ export default function Services() {
       />
     </div>
   );
-}
-
-function fmtInt(n) {
-  const v = Math.round(safeNum(n, 0));
-  try {
-    return new Intl.NumberFormat(undefined).format(v);
-  } catch {
-    return String(v);
-  }
 }
