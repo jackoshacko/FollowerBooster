@@ -11,7 +11,7 @@ export function apiUrl(path = "") {
 export function getToken() {
   const t = localStorage.getItem("token") || "";
   if (!t || t === "null" || t === "undefined") return "";
-  return t;
+  return String(t);
 }
 
 function normalizeToken(token) {
@@ -57,19 +57,19 @@ export function clearAuthLocal() {
 }
 
 /* ================= ROUTE GUARDS ================= */
-// ✅ PUBLIC rute (ovde ti je falio /services)
+// ✅ PUBLIC rute (ovde obavezno /services i ostalo)
 const PUBLIC_PREFIXES = [
   "/", // home
-  "/services", // ✅ public catalog
+  "/services", // public catalog
+  "/faq",
+  "/contact",
+  "/terms",
+  "/privacy",
+  "/refund",
   "/login",
   "/register",
   "/no-access",
   "/auth/callback",
-  "/terms",
-  "/privacy",
-  "/refund",
-  "/contact",
-  "/faq",
 ];
 
 function isPublicPath(pathname) {
@@ -78,8 +78,9 @@ function isPublicPath(pathname) {
   return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
 }
 
-// ✅ PROTECTED rute (samo ovde sme auto-redirect na login)
+// ✅ PROTECTED rute — NAJBITNIJE: /app (jer ti je /app/dashboard)
 const PROTECTED_PREFIXES = [
+  "/app", // ✅ fix: tvoje authed stranice su ovde
   "/dashboard",
   "/create-order",
   "/orders",
@@ -125,7 +126,10 @@ async function readResponse(res) {
       }
     } else {
       const t = text.trim();
-      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+      if (
+        (t.startsWith("{") && t.endsWith("}")) ||
+        (t.startsWith("[") && t.endsWith("]"))
+      ) {
         try {
           json = JSON.parse(t);
         } catch {
@@ -144,7 +148,7 @@ function pickErrorMessage(json, textFallback = "", statusFallback = "Request fai
 
 function looksLikeHtml(text) {
   if (!text) return false;
-  const t = text.toLowerCase();
+  const t = String(text).toLowerCase();
   return t.includes("<html") || t.includes("<!doctype html");
 }
 
@@ -212,6 +216,7 @@ export async function request(path, options = {}) {
 
   const { json, text, contentType } = await readResponse(res);
 
+  // ngrok / wrong URL / proxy -> HTML
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
     const err = new Error(
       `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(path)}`
@@ -228,9 +233,12 @@ export async function request(path, options = {}) {
     err.data = json ?? { text };
 
     // samo ako smo na protected ruti -> tek tad smemo da očistimo + redirect
-    if (typeof window !== "undefined" && isProtectedPath(window.location.pathname || "/")) {
-      clearAuthLocal();
-      redirectToLogin();
+    if (typeof window !== "undefined") {
+      const cur = window.location.pathname || "/";
+      if (isProtectedPath(cur)) {
+        clearAuthLocal();
+        redirectToLogin();
+      }
     }
 
     throw err;
@@ -241,6 +249,7 @@ export async function request(path, options = {}) {
       contentType.includes("text") || contentType.includes("html")
         ? (text || "").slice(0, 300)
         : "";
+
     const err = new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
     err.status = res.status;
     err.data = json ?? { text };
@@ -281,7 +290,6 @@ export const api = {
 
   login: async (payload) => {
     const out = await request("/auth/login", { method: "POST", body: payload });
-
     const t = extractToken(out);
     if (t) setToken(t);
 
@@ -290,13 +298,11 @@ export const api = {
       setUser(u);
       if (u.role) setRole(u.role);
     }
-
     return out;
   },
 
   register: async (payload) => {
     const out = await request("/auth/register", { method: "POST", body: payload });
-
     const t = extractToken(out);
     if (t) setToken(t);
 
@@ -305,12 +311,12 @@ export const api = {
       setUser(u);
       if (u.role) setRole(u.role);
     }
-
     return out;
   },
 
   logoutLocal: () => {
     clearAuthLocal();
+    // ne redirectuj ako si na public; redirectToLogin sam čuva
     redirectToLogin();
   },
 
@@ -325,7 +331,6 @@ export const api = {
   myOrders: () => request("/orders"),
 
   wallet: () => request("/wallet"),
-
   dashboard: () => request("/api/dashboard"),
 
   paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: payload }),
