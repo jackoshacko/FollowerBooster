@@ -1,5 +1,5 @@
 // client/src/pages/Login.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { api, apiUrl, clearAuthLocal, setToken } from "../lib/api.js";
 
@@ -65,25 +65,11 @@ const inputCls = cls(
 
 /* =======================
    Cloudflare Turnstile
+   (SCRIPT JE U INDEX.HTML! ovdje ga ne ubacujemo)
 ======================= */
 
-// ✅ stavi tvoj SITE KEY ovde
-const TURNSTILE_SITE_KEY = "0x4AAAAAAACkWeLnKEIxFJtcP";
-
-// optional: add script if nije već u index.html
-function ensureTurnstileScript() {
-  if (typeof window === "undefined") return;
-  if (window.turnstile) return;
-
-  const existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]');
-  if (existing) return;
-
-  const s = document.createElement("script");
-  s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-  s.async = true;
-  s.defer = true;
-  document.head.appendChild(s);
-}
+const TURNSTILE_SITE_KEY =
+  import.meta?.env?.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAAACkWeLnKEIxFJtcP";
 
 export default function Login() {
   const nav = useNavigate();
@@ -99,61 +85,72 @@ export default function Login() {
   const [err, setErr] = useState("");
   const [capsOn, setCapsOn] = useState(false);
 
-  // ✅ Turnstile token + widget id (za reset)
+  // ✅ Turnstile token
   const [tsToken, setTsToken] = useState("");
-  const [tsWidgetId, setTsWidgetId] = useState(null);
+
+  // ✅ Stabilno mountovanje preko ref-a (bez query selector stringova)
+  const tsBoxRef = useRef(null);
+  const tsWidgetIdRef = useRef(null);
 
   useEffect(() => {
     if (!password) setCapsOn(false);
   }, [password]);
 
-  // ✅ mount Turnstile (explicit render) kad se script učita
+  // ✅ Turnstile mount (NE UBACUJEMO SCRIPT OVDE!)
   useEffect(() => {
-    ensureTurnstileScript();
-
-    let tries = 0;
     let cancelled = false;
+    let tries = 0;
 
     const mount = () => {
       if (cancelled) return;
+      if (!tsBoxRef.current) return;
 
-      const el = document.getElementById("cf-turnstile-login");
-      if (!el) return;
+      // već renderovan
+      if (tsWidgetIdRef.current != null) return;
 
       if (!window.turnstile || typeof window.turnstile.render !== "function") {
         tries += 1;
-        if (tries < 120) setTimeout(mount, 100); // čekaj do ~12s
+        if (tries < 120) setTimeout(mount, 100); // ~12s max čekanja
         return;
       }
 
-      // ako je već renderovan, ne renderuj opet
-      if (tsWidgetId != null) return;
+      try {
+        const wid = window.turnstile.render(tsBoxRef.current, {
+          sitekey: TURNSTILE_SITE_KEY,
 
-      const wid = window.turnstile.render("#cf-turnstile-login", {
-        sitekey: TURNSTILE_SITE_KEY,
-        callback: (token) => {
-          setTsToken(String(token || ""));
-        },
-        "expired-callback": () => {
-          setTsToken("");
-        },
-        "error-callback": () => {
-          setTsToken("");
-        },
-        // theme: "dark", // optional
-      });
+          // ✅ BITNO: eksplicitno normal/compact (nikad invisible)
+          size: "normal",
 
-      setTsWidgetId(wid);
+          // optional
+          theme: "dark",
+
+          callback: (token) => setTsToken(String(token || "")),
+          "expired-callback": () => setTsToken(""),
+          "error-callback": () => setTsToken(""),
+        });
+
+        tsWidgetIdRef.current = wid;
+      } catch {
+        // ako render baci error, probaj opet kratko
+        tries += 1;
+        if (tries < 20) setTimeout(mount, 200);
+      }
     };
 
     mount();
 
     return () => {
       cancelled = true;
-      // ne radimo remove widget-a ovde da ne bug-uje na route transitions
+      try {
+        // cleanup (da ne ostane stari widget kad mijenjaš rute)
+        if (window.turnstile && tsWidgetIdRef.current != null) {
+          window.turnstile.remove(tsWidgetIdRef.current);
+        }
+      } catch {}
+      tsWidgetIdRef.current = null;
+      setTsToken("");
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tsWidgetId]);
+  }, []);
 
   async function submit(e) {
     e.preventDefault();
@@ -174,7 +171,6 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // ✅ šaljemo turnstileToken backend-u
       const data = await api.login({
         email: normalizedEmail,
         password,
@@ -217,9 +213,11 @@ export default function Login() {
       setErr(e2?.message || "Login failed");
       clearAuthLocal();
 
-      // ✅ reset Turnstile posle fail-a (da ne ostane "stari" token)
+      // ✅ reset Turnstile posle fail-a
       try {
-        if (window.turnstile && tsWidgetId != null) window.turnstile.reset(tsWidgetId);
+        if (window.turnstile && tsWidgetIdRef.current != null) {
+          window.turnstile.reset(tsWidgetIdRef.current);
+        }
       } catch {}
       setTsToken("");
     } finally {
@@ -228,7 +226,6 @@ export default function Login() {
   }
 
   function googleLogin() {
-    // ✅ IMPORTANT: send frontend origin so backend can redirect back correctly (no localhost on phone)
     const from = typeof window !== "undefined" ? window.location.origin : "";
     const params = new URLSearchParams();
     if (from) params.set("from", from);
@@ -240,11 +237,8 @@ export default function Login() {
   const canSubmit = isValidEmail(email) && password.length > 0 && !loading && !!tsToken;
 
   return (
-    // ✅ CONTENT-ONLY: PublicLayout already provides background + topbar + scroll container
     <div className="mx-auto w-full max-w-[1100px]">
-      {/* ✅ Perfect spacing for all devices */}
       <div className="grid gap-5 lg:gap-6 lg:grid-cols-[1.05fr_0.95fr] items-start">
-        {/* Left info card (hidden on mobile, shows on laptop+) */}
         <div className="hidden lg:block">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_40px_140px_rgba(0,0,0,0.55)]">
             <div className="flex items-center gap-3">
@@ -299,7 +293,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Right auth card (always visible) */}
         <div className="w-full">
           <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-zinc-950/70 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_140px_rgba(0,0,0,0.60)]">
             <div className="pointer-events-none absolute inset-0">
@@ -412,10 +405,10 @@ export default function Login() {
                   />
                 </Field>
 
-                {/* ✅ TURNSTILE (no UI redesign, just placed cleanly) */}
+                {/* ✅ TURNSTILE */}
                 <div className="pt-1">
                   <div
-                    id="cf-turnstile-login"
+                    ref={tsBoxRef}
                     className="min-h-[65px] rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-xl"
                   />
                   <div className="mt-2 text-[11px] text-zinc-300/60">
@@ -492,7 +485,6 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Mobile helper card (only on small screens) */}
           <div className="mt-5 lg:hidden rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-2xl">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-black/25">
