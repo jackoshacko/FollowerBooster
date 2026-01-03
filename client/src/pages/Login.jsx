@@ -64,51 +64,16 @@ const inputCls = cls(
 );
 
 /* =======================
-   Cloudflare Turnstile FIX
+   Turnstile (script is in index.html)
 ======================= */
 
 const TURNSTILE_SITE_KEY =
   import.meta?.env?.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAACKWeLnKEIxFJtqP";
 
-// Load Turnstile in explicit mode (safe + only once)
-function loadTurnstileExplicit() {
-  if (typeof window === "undefined") return Promise.resolve(false);
-
-  // already ready
-  if (window.turnstile && typeof window.turnstile.render === "function") {
-    return Promise.resolve(true);
-  }
-
-  // already appended
-  const existing = document.querySelector(
-    'script[data-turnstile="1"], script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]'
-  );
-
-  if (existing) {
-    // wait until window.turnstile appears
-    return new Promise((resolve) => {
-      let tries = 0;
-      const tick = () => {
-        tries += 1;
-        if (window.turnstile && typeof window.turnstile.render === "function") return resolve(true);
-        if (tries > 200) return resolve(false); // ~10s
-        setTimeout(tick, 50);
-      };
-      tick();
-    });
-  }
-
-  // append explicit script
-  return new Promise((resolve) => {
-    const s = document.createElement("script");
-    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    s.defer = true;
-    s.async = false;
-    s.setAttribute("data-turnstile", "1");
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.head.appendChild(s);
-  });
+function safeStr(v) {
+  const s = String(v || "").trim();
+  if (!s || s === "null" || s === "undefined") return "";
+  return s;
 }
 
 export default function Login() {
@@ -127,6 +92,7 @@ export default function Login() {
 
   // Turnstile
   const [tsToken, setTsToken] = useState("");
+  const [tsStatus, setTsStatus] = useState("loading"); // loading | ready | verified | error
   const tsBoxRef = useRef(null);
   const tsWidgetIdRef = useRef(null);
 
@@ -134,47 +100,75 @@ export default function Login() {
     if (!password) setCapsOn(false);
   }, [password]);
 
-  // ✅ robust mount: always loads script (explicit) then renders
+  // ✅ mount Turnstile (wait for window.turnstile from index.html script)
   useEffect(() => {
     let cancelled = false;
+    let tries = 0;
+    const MAX_TRIES = 240; // ~12s (50ms)
 
-    async function mountTurnstile() {
-      // wait for container
+    async function mount() {
+      if (cancelled) return;
       if (!tsBoxRef.current) return;
 
-      const ok = await loadTurnstileExplicit();
-      if (!ok || cancelled) return;
+      setTsStatus("loading");
 
-      if (!window.turnstile || typeof window.turnstile.render !== "function") return;
-
-      // already rendered
-      if (tsWidgetIdRef.current != null) return;
-
+      // cleanup old widget if any
       try {
-        const wid = window.turnstile.render(tsBoxRef.current, {
-          sitekey: TURNSTILE_SITE_KEY,
+        if (window.turnstile && tsWidgetIdRef.current != null) {
+          window.turnstile.remove(tsWidgetIdRef.current);
+        }
+      } catch {}
+      tsWidgetIdRef.current = null;
+      setTsToken("");
 
-          // ✅ IMPORTANT: only normal/compact
-          size: "normal",
-          theme: "dark",
+      const waitForTurnstile = () => {
+        if (cancelled) return;
 
-          callback: (token) => {
-            // debug (obriši kad proradi)
-            console.log("TURNSTILE TOKEN:", token);
-            setTsToken(String(token || ""));
-          },
-          "expired-callback": () => setTsToken(""),
-          "error-callback": () => setTsToken(""),
-        });
+        if (window.turnstile && typeof window.turnstile.render === "function") {
+          try {
+            const wid = window.turnstile.render(tsBoxRef.current, {
+              sitekey: TURNSTILE_SITE_KEY,
+              size: "normal",
+              theme: "dark",
 
-        tsWidgetIdRef.current = wid;
-      } catch (e) {
-        console.log("turnstile render error", e);
-        setTsToken("");
-      }
+              callback: (token) => {
+                if (cancelled) return;
+                const t = safeStr(token);
+                setTsToken(t);
+                setTsStatus(t ? "verified" : "ready");
+              },
+              "expired-callback": () => {
+                if (cancelled) return;
+                setTsToken("");
+                setTsStatus("ready");
+              },
+              "error-callback": () => {
+                if (cancelled) return;
+                setTsToken("");
+                setTsStatus("error");
+              },
+            });
+
+            tsWidgetIdRef.current = wid;
+            setTsStatus("ready");
+          } catch {
+            setTsStatus("error");
+          }
+          return;
+        }
+
+        tries += 1;
+        if (tries > MAX_TRIES) {
+          setTsStatus("error");
+          return;
+        }
+        setTimeout(waitForTurnstile, 50);
+      };
+
+      waitForTurnstile();
     }
 
-    mountTurnstile();
+    mount();
 
     return () => {
       cancelled = true;
@@ -184,9 +178,8 @@ export default function Login() {
         }
       } catch {}
       tsWidgetIdRef.current = null;
-      setTsToken("");
     };
-  }, []);
+  }, [loc.key]);
 
   async function submit(e) {
     e.preventDefault();
@@ -199,7 +192,6 @@ export default function Login() {
       return setErr("Please enter a valid email address (example: you@example.com).");
     if (!password) return setErr("Please enter your password.");
 
-    // Turnstile required
     if (!tsToken) return setErr("Please verify you are human (Turnstile).");
 
     setLoading(true);
@@ -208,7 +200,10 @@ export default function Login() {
       const data = await api.login({
         email: normalizedEmail,
         password,
+
+        // ✅ šaljemo oba imena, da backend sigurno pokupi
         turnstileToken: tsToken,
+        cfTurnstileToken: tsToken,
       });
 
       const accessToken = data?.accessToken || data?.token;
@@ -229,7 +224,7 @@ export default function Login() {
       localStorage.setItem("role", role || "user");
 
       if (!remember) {
-        // optional future: move token to sessionStorage
+        // future: sessionStorage
       }
 
       window.dispatchEvent(new Event("auth-changed"));
@@ -254,6 +249,7 @@ export default function Login() {
         }
       } catch {}
       setTsToken("");
+      setTsStatus("ready");
     } finally {
       setLoading(false);
     }
@@ -443,10 +439,19 @@ export default function Login() {
                 <div className="pt-1">
                   <div
                     ref={tsBoxRef}
-                    className="min-h-[65px] rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-xl"
+                    className="min-h-[78px] rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-xl"
                   />
-                  <div className="mt-2 text-[11px] text-zinc-300/60">
-                    Protected by Cloudflare Turnstile.
+                  <div className="mt-2 text-[11px] text-zinc-300/60 flex items-center justify-between gap-3">
+                    <span>Protected by Cloudflare Turnstile.</span>
+                    <span className="text-zinc-200/70">
+                      {tsStatus === "loading" ? "Loading…" : null}
+                      {tsStatus === "ready" ? "Ready" : null}
+                      {tsStatus === "verified" ? "Verified" : null}
+                      {tsStatus === "error" ? "Error" : null}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-zinc-400/60">
+                    Token: {tsToken ? `${tsToken.length} chars` : "—"}
                   </div>
                 </div>
 
