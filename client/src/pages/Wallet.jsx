@@ -86,8 +86,7 @@ function currencyToLower(cur) {
 }
 
 function clampTopupAmount(a) {
-  // safety policy aligned with backend (your stripe route uses MIN_CENTS=50)
-  // UI uses major units (EUR), so min 0.50
+  // UI uses major units (EUR), min 0.50, max 5000
   const min = 0.5;
   const max = 5000;
   const x = Number(a);
@@ -102,8 +101,9 @@ function amountToCents(amountMajor) {
 }
 
 /* =========================
-   Tiny Stripe mark (no image import)
+   Tiny Stripe/PayPal marks (no image import)
 ========================= */
+
 function StripeMark({ className = "" }) {
   return (
     <span
@@ -244,6 +244,7 @@ function Toast({ toast, onClose }) {
             onClick={onClose}
             className="rounded-xl border border-white/10 bg-white/5 p-1.5 text-zinc-100 hover:bg-white/10"
             title="Close"
+            type="button"
           >
             <X className="h-4 w-4" />
           </button>
@@ -259,7 +260,12 @@ function Toast({ toast, onClose }) {
 
 function TxRow({ tx, onCopy }) {
   const type = String(tx?.type || tx?.kind || tx?.provider || "tx").toLowerCase();
-  const status = String(tx?.status || "completed").toLowerCase();
+  const statusRaw = String(tx?.status || "completed").toLowerCase();
+
+  // nicer labels (pending -> processing, confirmed -> confirmed)
+  const statusLabel =
+    statusRaw === "pending" ? "processing" : statusRaw === "confirmed" ? "confirmed" : statusRaw;
+
   const amount = safeNum(tx?.amount ?? tx?.delta ?? 0, 0);
   const cur = String(tx?.currency || "EUR").toUpperCase();
 
@@ -278,9 +284,9 @@ function TxRow({ tx, onCopy }) {
       : "Transaction";
 
   const badgeTone =
-    status === "completed" || status === "confirmed" || status === "success"
+    statusRaw === "completed" || statusRaw === "confirmed" || statusRaw === "success"
       ? "emerald"
-      : status === "pending"
+      : statusRaw === "pending"
       ? "amber"
       : "red";
 
@@ -291,7 +297,7 @@ function TxRow({ tx, onCopy }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold text-white">{label}</div>
-          <Badge tone={badgeTone}>{status}</Badge>
+          <Badge tone={badgeTone}>{statusLabel}</Badge>
         </div>
 
         <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-zinc-200/60">
@@ -351,7 +357,29 @@ export default function Wallet() {
   const nav = useNavigate();
 
   const [balance, setBalance] = useState(0);
-  const [txs, setTxs] = useState([]);
+
+  // ✅ raw list from backend (so we can filter safely + compute KPIs correctly)
+  const [txsRaw, setTxsRaw] = useState([]);
+
+  // ✅ visible list for UI (no “double confirmed”)
+  const visibleTxs = useMemo(() => {
+    const list = Array.isArray(txsRaw) ? txsRaw : [];
+
+    return list.filter((t) => {
+      const type = String(t?.type || t?.kind || t?.provider || "").toLowerCase();
+      const status = String(t?.status || "").toLowerCase();
+
+      // Show pending reservations so user sees “processing”
+      if (type === "topup" && status === "pending") return true;
+
+      // Hide confirmed reservation rows (because topup_credit exists and is the real credit)
+      if (type === "topup" && status === "confirmed") return false;
+
+      // Everything else stays (topup_credit, deduct, refund, etc.)
+      return true;
+    });
+  }, [txsRaw]);
+
   const [loading, setLoading] = useState(true);
 
   // topup
@@ -392,7 +420,7 @@ export default function Wallet() {
       const b = safeNum(data?.balance ?? data?.user?.balance ?? 0, 0);
       const list = data?.txs || data?.transactions || [];
       setBalance(b);
-      setTxs(Array.isArray(list) ? list : []);
+      setTxsRaw(Array.isArray(list) ? list : []);
     } catch (e) {
       setErr(e?.message || "Failed to load wallet");
     } finally {
@@ -518,15 +546,13 @@ export default function Wallet() {
     const a = validateAmountOrToast();
     if (!a) return;
 
-    // Stripe route expects cents + lowercase currency
     const amountCents = amountToCents(a);
     const cur = currencyToLower(currency);
 
     setPayingStripe(true);
     setErr("");
     try {
-      // ✅ If your backend already has /payments/stripe/checkout (as your console test showed)
-      // it should return: { ok: true, url: "https://checkout.stripe.com/..." }
+      // expects: { ok:true, url:"https://checkout.stripe.com/..." }
       const out = await api.post("/payments/stripe/checkout", {
         amountCents,
         currency: cur,
@@ -546,7 +572,6 @@ export default function Wallet() {
     }
   }
 
-  // future methods placeholders (UI only)
   function soon(methodName) {
     showToast({
       type: "info",
@@ -555,18 +580,25 @@ export default function Wallet() {
     });
   }
 
-  const spent = useMemo(
-    () => txs.reduce((s, t) => s + safeNum(t?.amount ?? t?.delta ?? 0, 0), 0),
-    [txs]
+  // ✅ KPIs computed from visible list (no double counting)
+  const transactionsCount = visibleTxs.length;
+
+  // show net only from visible list too (so it matches what user sees)
+  const netActivity = useMemo(
+    () => visibleTxs.reduce((s, t) => s + safeNum(t?.amount ?? t?.delta ?? 0, 0), 0),
+    [visibleTxs]
   );
 
-  const topups = useMemo(() => {
-    return txs.filter((t) => {
-      const k = String(t?.type || t?.kind || "").toLowerCase();
-      // you store: topup / topup_credit / etc.
-      return k.includes("topup");
+  // ✅ Top-ups: count only “topup_credit” (real credit), plus pending “topup” so user sees processing
+  const topupsCount = useMemo(() => {
+    return visibleTxs.filter((t) => {
+      const type = String(t?.type || t?.kind || t?.provider || "").toLowerCase();
+      const status = String(t?.status || "").toLowerCase();
+      if (type === "topup" && status === "pending") return true;
+      if (type === "topup_credit") return true;
+      return false;
     }).length;
-  }, [txs]);
+  }, [visibleTxs]);
 
   const payDisabled = payingPayPal || payingStripe;
 
@@ -630,18 +662,18 @@ export default function Wallet() {
 
         <GlassCard className="p-4">
           <div className="text-xs uppercase tracking-[0.18em] text-zinc-200/60">Transactions</div>
-          <div className="mt-2 text-2xl font-black text-white">{txs.length}</div>
+          <div className="mt-2 text-2xl font-black text-white">{transactionsCount}</div>
         </GlassCard>
 
         <GlassCard className="p-4">
           <div className="text-xs uppercase tracking-[0.18em] text-zinc-200/60">Top-ups</div>
-          <div className="mt-2 text-2xl font-black text-white">{topups}</div>
+          <div className="mt-2 text-2xl font-black text-white">{topupsCount}</div>
         </GlassCard>
 
         <GlassCard className="p-4">
           <div className="text-xs uppercase tracking-[0.18em] text-zinc-200/60">Net activity</div>
           <div className="mt-2 text-2xl font-black text-white">
-            {loading ? "—" : `${spent >= 0 ? "+" : "-"}${money2(Math.abs(spent))} ${currency}`}
+            {loading ? "—" : `${netActivity >= 0 ? "+" : "-"}${money2(Math.abs(netActivity))} ${currency}`}
           </div>
         </GlassCard>
 
@@ -736,7 +768,7 @@ export default function Wallet() {
               </div>
             </div>
 
-            {/* PAY BUTTONS (same styling, safe, mobile-friendly) */}
+            {/* PAY BUTTONS */}
             <div className="grid gap-2 sm:grid-cols-2">
               <button
                 onClick={startPayPal}
@@ -769,27 +801,25 @@ export default function Wallet() {
               </button>
             </div>
 
-            <div className="grid gap-2">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-200/70">
-                  <Badge tone="emerald">
-                    <ShieldCheck className="h-3.5 w-3.5" /> Webhook verified
-                  </Badge>
-                  <Badge tone="blue">
-                    <BadgeCheck className="h-3.5 w-3.5" /> Idempotent credits
-                  </Badge>
-                  <Badge tone="violet">
-                    <Sparkles className="h-3.5 w-3.5" /> Safe flow
-                  </Badge>
-                </div>
-                <div className="mt-2 text-xs text-zinc-200/60">
-                  Funds are credited after confirmation. Provider webhooks enforce idempotency (no double credits).
-                </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-200/70">
+                <Badge tone="emerald">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Webhook verified
+                </Badge>
+                <Badge tone="blue">
+                  <BadgeCheck className="h-3.5 w-3.5" /> Idempotent credits
+                </Badge>
+                <Badge tone="violet">
+                  <Sparkles className="h-3.5 w-3.5" /> Safe flow
+                </Badge>
+              </div>
+              <div className="mt-2 text-xs text-zinc-200/60">
+                Funds are credited after confirmation. Provider webhooks enforce idempotency (no double credits).
               </div>
             </div>
           </div>
 
-          {/* FUTURE PAYMENT METHODS (UI READY) */}
+          {/* FUTURE PAYMENT METHODS */}
           <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-white">Payment methods</div>
@@ -868,13 +898,13 @@ export default function Wallet() {
                 <Skeleton className="h-[74px] w-full" />
                 <Skeleton className="h-[74px] w-full" />
               </>
-            ) : txs.length === 0 ? (
+            ) : visibleTxs.length === 0 ? (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
                 <div className="text-sm font-semibold text-white">No transactions yet</div>
                 <div className="mt-1 text-xs text-zinc-200/60">Top up your wallet to get started.</div>
               </div>
             ) : (
-              txs.map((t) => (
+              visibleTxs.map((t) => (
                 <TxRow key={t?._id || t?.id || JSON.stringify(t)} tx={t} onCopy={onCopy} />
               ))
             )}
