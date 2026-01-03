@@ -48,10 +48,10 @@
       rel="stylesheet"
     />
 
-    <!-- ✅ Cloudflare Turnstile (load once globally) -->
+    <!-- ✅ Cloudflare Turnstile (EXPLICIT MODE) -->
+    <!-- Bitno: za SPA + turnstile.render() mora ?render=explicit -->
     <script
-      src="https://challenges.cloudflare.com/turnstile/v0/api.js"
-      async
+      src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
       defer
     ></script>
 
@@ -71,6 +71,8 @@
 
   <body>
     <div id="root"></div>
+
+    <!-- Vite entry -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
