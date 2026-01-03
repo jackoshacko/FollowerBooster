@@ -15,6 +15,10 @@ function round2(n) {
 const PROVIDERS = ["local", "google"];
 const ROLES = ["user", "admin"];
 
+/* =========================
+   SCHEMA
+========================= */
+
 const userSchema = new Schema(
   {
     email: {
@@ -30,6 +34,8 @@ const userSchema = new Schema(
      * Local auth:
      * - REQUIRED if provider === "local"
      * OAuth users can have empty hash (passwordless)
+     *
+     * SECURITY: select:false => won't be returned unless explicitly selected.
      */
     passwordHash: {
       type: String,
@@ -37,6 +43,7 @@ const userSchema = new Schema(
       select: false, // ✅ don't leak hash by default
       validate: {
         validator: function (v) {
+          // if local user => must have hash
           if (this.provider === "local") return typeof v === "string" && v.length > 0;
           return true;
         },
@@ -62,8 +69,6 @@ const userSchema = new Schema(
 
     /**
      * Wallet balance (EUR)
-     * Keeping Number to match your current code.
-     * We normalize to 2 decimals to avoid floating drift.
      */
     balance: { type: Number, default: 0, min: 0 },
   },
@@ -73,26 +78,15 @@ const userSchema = new Schema(
 /* =========================
    NORMALIZATION / SAFETY
 ========================= */
+
 userSchema.pre("validate", function (next) {
-  // normalize email consistently
   this.email = safeStr(this.email).toLowerCase();
-
-  // normalize providerId
   this.providerId = safeStr(this.providerId);
-
-  // normalize name
   this.name = safeStr(this.name);
-
-  // normalize balance
   this.balance = round2(this.balance);
 
-  // safety: google provider without providerId is pointless
-  if (this.provider === "google" && !this.providerId) {
-    // not throwing hard error to avoid breaking existing users;
-    // if you want strict, uncomment next line:
-    // return next(new Error("google user must have providerId"));
-  }
-
+  // soft safety: google provider without providerId is pointless
+  // (not throwing to avoid breaking old data)
   next();
 });
 
@@ -114,5 +108,18 @@ userSchema.index(
 // quick lists / admin panels
 userSchema.index({ createdAt: -1 });
 userSchema.index({ role: 1, createdAt: -1 });
+
+/* =========================
+   QUERY HELPERS (IMPORTANT)
+========================= */
+
+/**
+ * Use this ONLY in auth flows (login/reset) where you need passwordHash.
+ * Example:
+ *   const user = await User.findOne({ email }).withPassword();
+ */
+userSchema.query.withPassword = function () {
+  return this.select("+passwordHash");
+};
 
 export const User = mongoose.model("User", userSchema);

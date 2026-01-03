@@ -132,11 +132,11 @@ async function verifyTurnstile(req, turnstileToken) {
 ========================= */
 router.post("/register", authLimiter, async (req, res, next) => {
   try {
-    const { email, password, name, turnstileToken } = req.body || {};
+    const { email, password, name, turnstileToken, cfTurnstileToken } = req.body || {};
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    const ts = await verifyTurnstile(req, turnstileToken);
+    const ts = await verifyTurnstile(req, turnstileToken || cfTurnstileToken);
     if (!ts.ok) return res.status(400).json({ message: ts.reason });
 
     if (!normalizedEmail || !pw) {
@@ -180,22 +180,23 @@ router.post("/register", authLimiter, async (req, res, next) => {
 ========================= */
 router.post("/login", authLimiter, async (req, res, next) => {
   try {
-    const { email, password, turnstileToken } = req.body || {};
+    const { email, password, turnstileToken, cfTurnstileToken } = req.body || {};
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    // ✅ basic validation first (pre nego bcrypt)
     if (!normalizedEmail || !pw) {
       return res.status(400).json({ message: "email and password required" });
     }
 
-    const ts = await verifyTurnstile(req, turnstileToken);
+    const ts = await verifyTurnstile(req, turnstileToken || cfTurnstileToken);
     if (!ts.ok) return res.status(400).json({ message: ts.reason });
 
-    const user = await User.findOne({ email: normalizedEmail });
+    // ✅ CRITICAL FIX:
+    // passwordHash is select:false in schema, so we MUST explicitly select it for login
+    const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash");
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
-    // ✅ FIX: ako je Google user ili nema passwordHash -> bcrypt puca sa “data and hash arguments required”
+    // if truly no passwordHash (google-only user or corrupted record)
     if (!user.passwordHash) {
       return res.status(401).json({
         message: "This account has no password. Use Google login or reset password.",
