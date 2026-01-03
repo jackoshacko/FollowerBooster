@@ -64,12 +64,52 @@ const inputCls = cls(
 );
 
 /* =======================
-   Cloudflare Turnstile
-   (SCRIPT JE U INDEX.HTML! ovdje ga ne ubacujemo)
+   Cloudflare Turnstile FIX
 ======================= */
 
 const TURNSTILE_SITE_KEY =
-  import.meta?.env?.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAAACkWeLnKEIxFJtcP";
+  import.meta?.env?.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAACKWeLnKEIxFJtqP";
+
+// Load Turnstile in explicit mode (safe + only once)
+function loadTurnstileExplicit() {
+  if (typeof window === "undefined") return Promise.resolve(false);
+
+  // already ready
+  if (window.turnstile && typeof window.turnstile.render === "function") {
+    return Promise.resolve(true);
+  }
+
+  // already appended
+  const existing = document.querySelector(
+    'script[data-turnstile="1"], script[src*="challenges.cloudflare.com/turnstile/v0/api.js"]'
+  );
+
+  if (existing) {
+    // wait until window.turnstile appears
+    return new Promise((resolve) => {
+      let tries = 0;
+      const tick = () => {
+        tries += 1;
+        if (window.turnstile && typeof window.turnstile.render === "function") return resolve(true);
+        if (tries > 200) return resolve(false); // ~10s
+        setTimeout(tick, 50);
+      };
+      tick();
+    });
+  }
+
+  // append explicit script
+  return new Promise((resolve) => {
+    const s = document.createElement("script");
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    s.defer = true;
+    s.async = false;
+    s.setAttribute("data-turnstile", "1");
+    s.onload = () => resolve(true);
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+}
 
 export default function Login() {
   const nav = useNavigate();
@@ -85,10 +125,8 @@ export default function Login() {
   const [err, setErr] = useState("");
   const [capsOn, setCapsOn] = useState(false);
 
-  // ✅ Turnstile token
+  // Turnstile
   const [tsToken, setTsToken] = useState("");
-
-  // ✅ Stabilno mountovanje preko ref-a (bez query selector stringova)
   const tsBoxRef = useRef(null);
   const tsWidgetIdRef = useRef(null);
 
@@ -96,53 +134,51 @@ export default function Login() {
     if (!password) setCapsOn(false);
   }, [password]);
 
-  // ✅ Turnstile mount (NE UBACUJEMO SCRIPT OVDE!)
+  // ✅ robust mount: always loads script (explicit) then renders
   useEffect(() => {
     let cancelled = false;
-    let tries = 0;
 
-    const mount = () => {
-      if (cancelled) return;
+    async function mountTurnstile() {
+      // wait for container
       if (!tsBoxRef.current) return;
 
-      // već renderovan
-      if (tsWidgetIdRef.current != null) return;
+      const ok = await loadTurnstileExplicit();
+      if (!ok || cancelled) return;
 
-      if (!window.turnstile || typeof window.turnstile.render !== "function") {
-        tries += 1;
-        if (tries < 120) setTimeout(mount, 100); // ~12s max čekanja
-        return;
-      }
+      if (!window.turnstile || typeof window.turnstile.render !== "function") return;
+
+      // already rendered
+      if (tsWidgetIdRef.current != null) return;
 
       try {
         const wid = window.turnstile.render(tsBoxRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
 
-          // ✅ BITNO: eksplicitno normal/compact (nikad invisible)
+          // ✅ IMPORTANT: only normal/compact
           size: "normal",
-
-          // optional
           theme: "dark",
 
-          callback: (token) => setTsToken(String(token || "")),
+          callback: (token) => {
+            // debug (obriši kad proradi)
+            console.log("TURNSTILE TOKEN:", token);
+            setTsToken(String(token || ""));
+          },
           "expired-callback": () => setTsToken(""),
           "error-callback": () => setTsToken(""),
         });
 
         tsWidgetIdRef.current = wid;
-      } catch {
-        // ako render baci error, probaj opet kratko
-        tries += 1;
-        if (tries < 20) setTimeout(mount, 200);
+      } catch (e) {
+        console.log("turnstile render error", e);
+        setTsToken("");
       }
-    };
+    }
 
-    mount();
+    mountTurnstile();
 
     return () => {
       cancelled = true;
       try {
-        // cleanup (da ne ostane stari widget kad mijenjaš rute)
         if (window.turnstile && tsWidgetIdRef.current != null) {
           window.turnstile.remove(tsWidgetIdRef.current);
         }
@@ -163,10 +199,8 @@ export default function Login() {
       return setErr("Please enter a valid email address (example: you@example.com).");
     if (!password) return setErr("Please enter your password.");
 
-    // ✅ Turnstile check
-    if (!tsToken) {
-      return setErr("Please verify you are human (Turnstile).");
-    }
+    // Turnstile required
+    if (!tsToken) return setErr("Please verify you are human (Turnstile).");
 
     setLoading(true);
 
@@ -213,7 +247,7 @@ export default function Login() {
       setErr(e2?.message || "Login failed");
       clearAuthLocal();
 
-      // ✅ reset Turnstile posle fail-a
+      // reset widget on fail
       try {
         if (window.turnstile && tsWidgetIdRef.current != null) {
           window.turnstile.reset(tsWidgetIdRef.current);
