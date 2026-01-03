@@ -71,6 +71,18 @@ const inputCls = cls(
   "focus:border-white/20 focus:bg-white/10"
 );
 
+/* =======================
+   Turnstile (script is in index.html)
+======================= */
+const TURNSTILE_SITE_KEY =
+  import.meta?.env?.VITE_TURNSTILE_SITE_KEY || "0x4AAAAAACKWeLnKEIxFJtqP";
+
+function safeStr(v) {
+  const s = String(v || "").trim();
+  if (!s || s === "null" || s === "undefined") return "";
+  return s;
+}
+
 export default function Register() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -91,10 +103,16 @@ export default function Register() {
   // Honeypot for bots
   const [website, setWebsite] = useState("");
 
-  // Frontend cooldown (extra layer; real protection = backend rate-limit)
+  // Frontend cooldown
   const [cooldown, setCooldown] = useState(0);
   const cdRef = useRef(null);
   const lastSubmitRef = useRef(0);
+
+  // Turnstile state
+  const [tsToken, setTsToken] = useState("");
+  const [tsStatus, setTsStatus] = useState("loading"); // loading | ready | verified | error
+  const tsBoxRef = useRef(null);
+  const tsWidgetIdRef = useRef(null);
 
   useEffect(() => {
     return () => window.clearInterval(cdRef.current);
@@ -117,6 +135,76 @@ export default function Register() {
     }, 1000);
   }
 
+  // ✅ mount Turnstile (same style as Login.jsx)
+  useEffect(() => {
+    let cancelled = false;
+    let tries = 0;
+    const MAX_TRIES = 240;
+
+    function cleanup() {
+      try {
+        if (window.turnstile && tsWidgetIdRef.current != null) {
+          window.turnstile.remove(tsWidgetIdRef.current);
+        }
+      } catch {}
+      tsWidgetIdRef.current = null;
+      setTsToken("");
+    }
+
+    function waitForTurnstile() {
+      if (cancelled) return;
+      if (!tsBoxRef.current) return;
+
+      if (window.turnstile && typeof window.turnstile.render === "function") {
+        try {
+          const wid = window.turnstile.render(tsBoxRef.current, {
+            sitekey: TURNSTILE_SITE_KEY,
+            size: "normal",
+            theme: "dark",
+            callback: (token) => {
+              if (cancelled) return;
+              const t = safeStr(token);
+              setTsToken(t);
+              setTsStatus(t ? "verified" : "ready");
+            },
+            "expired-callback": () => {
+              if (cancelled) return;
+              setTsToken("");
+              setTsStatus("ready");
+            },
+            "error-callback": () => {
+              if (cancelled) return;
+              setTsToken("");
+              setTsStatus("error");
+            },
+          });
+
+          tsWidgetIdRef.current = wid;
+          setTsStatus("ready");
+        } catch {
+          setTsStatus("error");
+        }
+        return;
+      }
+
+      tries += 1;
+      if (tries > MAX_TRIES) {
+        setTsStatus("error");
+        return;
+      }
+      setTimeout(waitForTurnstile, 50);
+    }
+
+    setTsStatus("loading");
+    cleanup();
+    waitForTurnstile();
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [loc.key]);
+
   const canSubmit = useMemo(() => {
     if (loading) return false;
     if (cooldown > 0) return false;
@@ -124,14 +212,15 @@ export default function Register() {
     if (!isValidEmail(email)) return false;
     if (String(pw).length < 8) return false;
     if (pw !== pw2) return false;
+    if (!tsToken) return false;
     return true;
-  }, [loading, cooldown, agree, email, pw, pw2]);
+  }, [loading, cooldown, agree, email, pw, pw2, tsToken]);
 
   async function submit(e) {
     e.preventDefault();
     setErr("");
 
-    // honeypot hit => silently cooldown
+    // honeypot hit
     if (website.trim()) {
       startCooldown(12);
       return;
@@ -150,32 +239,54 @@ export default function Register() {
     if (String(pw || "").length < 8) return setErr("Password must be at least 8 characters.");
     if (pw !== pw2) return setErr("Passwords do not match.");
     if (!agree) return setErr("You must agree to Terms & Privacy Policy.");
+    if (!tsToken) return setErr("Please verify you are human (Turnstile).");
     if (cooldown > 0) return;
 
     setLoading(true);
     try {
-      // backend can ignore name if not supported yet
-      await api.register({
+      const out = await api.register({
         email: normalizedEmail,
         password: pw,
         name: fullName.trim() || undefined,
+
+        // ✅ send token (backend can accept either key)
+        turnstileToken: tsToken,
+        cfTurnstileToken: tsToken,
       });
 
       startCooldown(8);
 
-      // keep next for login
+      // If backend returns token -> you are already logged in, go to app
+      const hasToken =
+        !!out?.accessToken || !!out?.token || !!localStorage.getItem("token");
+
+      if (hasToken) {
+        const target = next || "/app/dashboard";
+        nav(target, { replace: true });
+        return;
+      }
+
+      // Otherwise go to login
       const loginUrl = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
       nav(loginUrl, { replace: true });
     } catch (e2) {
       setErr(e2?.message || "Register failed");
       startCooldown(12);
+
+      // reset widget on fail
+      try {
+        if (window.turnstile && tsWidgetIdRef.current != null) {
+          window.turnstile.reset(tsWidgetIdRef.current);
+        }
+      } catch {}
+      setTsToken("");
+      setTsStatus("ready");
     } finally {
       setLoading(false);
     }
   }
 
   function googleSignup() {
-    // ✅ IMPORTANT: avoid localhost issue on phone by sending frontend origin
     const from = typeof window !== "undefined" ? window.location.origin : "";
     const params = new URLSearchParams();
     if (from) params.set("from", from);
@@ -185,10 +296,8 @@ export default function Register() {
   }
 
   return (
-    // ✅ CONTENT-ONLY: PublicLayout already provides background + topbar + scroll container
     <div className="mx-auto w-full max-w-[1100px]">
       <div className="grid gap-5 lg:gap-6 lg:grid-cols-[1.05fr_0.95fr] items-start">
-        {/* Left info card (desktop+) */}
         <div className="hidden lg:block">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.05),0_40px_140px_rgba(0,0,0,0.55)]">
             <div className="flex items-center gap-3">
@@ -243,7 +352,6 @@ export default function Register() {
           </div>
         </div>
 
-        {/* Right form card */}
         <div className="w-full">
           <div className="relative overflow-hidden rounded-3xl border border-white/12 bg-zinc-950/70 backdrop-blur-2xl shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_40px_140px_rgba(0,0,0,0.60)]">
             <div className="pointer-events-none absolute inset-0">
@@ -303,7 +411,6 @@ export default function Register() {
               </div>
 
               <form onSubmit={submit} className="mt-5 grid gap-3">
-                {/* honeypot */}
                 <input
                   value={website}
                   onChange={(e) => setWebsite(e.target.value)}
@@ -410,6 +517,26 @@ export default function Register() {
                   </div>
                 </div>
 
+                {/* ✅ TURNSTILE */}
+                <div className="pt-1">
+                  <div
+                    ref={tsBoxRef}
+                    className="min-h-[78px] rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-xl"
+                  />
+                  <div className="mt-2 text-[11px] text-zinc-300/60 flex items-center justify-between gap-3">
+                    <span>Protected by Cloudflare Turnstile.</span>
+                    <span className="text-zinc-200/70">
+                      {tsStatus === "loading" ? "Loading…" : null}
+                      {tsStatus === "ready" ? "Ready" : null}
+                      {tsStatus === "verified" ? "Verified" : null}
+                      {tsStatus === "error" ? "Error" : null}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-zinc-400/60">
+                    Token: {tsToken ? `${tsToken.length} chars` : "—"}
+                  </div>
+                </div>
+
                 <div className="flex items-start justify-between gap-3 pt-1">
                   <label className="flex items-start gap-2 text-sm text-zinc-200/75 select-none">
                     <input
@@ -431,7 +558,9 @@ export default function Register() {
                     </span>
                   </label>
 
-                  <Pill tone="ok">Token-only</Pill>
+                  <Pill tone={tsToken ? "ok" : "warn"}>
+                    {tsToken ? "Verified" : "Verify"}
+                  </Pill>
                 </div>
 
                 <button
@@ -444,7 +573,11 @@ export default function Register() {
                       : "bg-white/10 text-white/60 border border-white/10 cursor-not-allowed"
                   )}
                 >
-                  {loading ? "Creating…" : cooldown > 0 ? `Please wait ${cooldown}s…` : "Create account"}
+                  {loading
+                    ? "Creating…"
+                    : cooldown > 0
+                      ? `Please wait ${cooldown}s…`
+                      : "Create account"}
                 </button>
 
                 <div className="mt-1 text-center text-sm text-zinc-200/70">
@@ -480,14 +613,13 @@ export default function Register() {
             </div>
 
             <div className="relative border-t border-white/10 bg-black/20 px-6 py-4 text-xs text-zinc-300/70 flex items-center justify-between">
-              <span>Secure signup • token-only</span>
+              <span>Secure signup</span>
               <Link to="/faq" className="text-white/85 hover:text-white transition font-semibold">
                 Help / FAQ
               </Link>
             </div>
           </div>
 
-          {/* Mobile helper card */}
           <div className="mt-5 lg:hidden rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-2xl">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-black/25">
