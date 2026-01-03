@@ -57,6 +57,7 @@ export function clearAuthLocal() {
 }
 
 /* ================= ROUTE GUARDS ================= */
+// Public rute
 const PUBLIC_PREFIXES = [
   "/",
   "/services",
@@ -77,6 +78,9 @@ function isPublicPath(pathname) {
   return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
 }
 
+// Protected rute
+// NOTE: zadrzao sam i stare prefikse zbog kompatibilnosti,
+// ali /app je glavni.
 const PROTECTED_PREFIXES = [
   "/app",
   "/dashboard",
@@ -154,11 +158,13 @@ function apiLooksNgrok() {
 function buildAuthHeader(token) {
   const t = String(token || "").trim();
   if (!t) return null;
-  if (/^bearer\s+/i.test(t)) return t;
+  if (/^bearer\s+/i.test(t)) return t; // already Bearer ...
   return `Bearer ${t}`;
 }
 
+// ✅ FIX: SSR/build safe (window možda ne postoji)
 function isSameOriginApi() {
+  if (typeof window === "undefined") return false;
   try {
     const api = new URL(String(API));
     const cur = new URL(window.location.origin);
@@ -180,7 +186,6 @@ export async function request(path, options = {}) {
   const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
   const isString = typeof body === "string";
 
-  // ✅ ako je body objekat, mora JSON.stringify
   const finalBody =
     !hasBody ? undefined : isForm || isBlob || isString ? body : JSON.stringify(body);
 
@@ -193,11 +198,15 @@ export async function request(path, options = {}) {
     ...(extraHeaders || {}),
   };
 
+  // ngrok helper (dev)
   if (apiLooksNgrok()) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
-  // ✅ auth flow (refresh cookie) -> include
+  // ✅ credentials:
+  // - if withCredentials true -> include cookies (refreshToken, etc.)
+  // - same-origin api -> include
+  // - otherwise omit
   const credentialsMode =
     withCredentials === true || isSameOriginApi() ? "include" : "omit";
 
@@ -207,7 +216,6 @@ export async function request(path, options = {}) {
     headers,
     body: method === "GET" || method === "HEAD" ? undefined : finalBody,
     credentials: credentialsMode,
-    // mode: "cors", // može i bez, default je ok; ostavljam kompatibilno:
     mode: "cors",
     cache: "no-store",
     redirect: "follow",
@@ -215,17 +223,15 @@ export async function request(path, options = {}) {
 
   const { json, text, contentType } = await readResponse(res);
 
-  // HTML umesto JSON (ngrok warning / proxy / wrong URL)
+  // HTML instead of JSON (wrong url / proxy / ngrok page)
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
-    const err = new Error(
-      `API returned HTML instead of JSON.\nURL: ${apiUrl(path)}`
-    );
+    const err = new Error(`API returned HTML instead of JSON.\nURL: ${apiUrl(path)}`);
     err.status = res.status;
     err.data = { text };
     throw err;
   }
 
-  // ✅ 401 handling: ne brisi token svuda, samo na protected
+  // 401 handling: clear only on protected route
   if (res.status === 401) {
     const err = new Error(pickErrorMessage(json, "Unauthorized"));
     err.status = 401;
@@ -254,7 +260,6 @@ export async function request(path, options = {}) {
     err.status = res.status;
     err.data = json ?? { text };
 
-    // ✅ debug helper (lakše da vidiš backend message)
     if (typeof window !== "undefined") {
       // eslint-disable-next-line no-console
       console.log("[API ERROR]", method, apiUrl(path), err.status, err.data);
@@ -299,7 +304,6 @@ export const api = {
 
   me: () => request("/api/me", { withCredentials: true }),
 
-  // ✅ LOGIN harden: always send clean strings + include cookies
   login: async (payload) => {
     const safe = {
       email: cleanStr(payload?.email).toLowerCase(),
@@ -324,7 +328,6 @@ export const api = {
     return out;
   },
 
-  // ✅ REGISTER harden
   register: async (payload) => {
     const safe = {
       email: cleanStr(payload?.email).toLowerCase(),
@@ -356,7 +359,7 @@ export const api = {
   },
 
   servicesPublic: () => request("/services"),
-  servicesAdmin: () => request("/admin/services"),
+  servicesAdmin: () => request("/admin/services", { withCredentials: true }),
 
   createService: (payload) =>
     request("/admin/services", { method: "POST", body: payload, withCredentials: true }),
@@ -372,13 +375,11 @@ export const api = {
   wallet: () => request("/wallet", { withCredentials: true }),
   dashboard: () => request("/api/dashboard", { withCredentials: true }),
 
-  /* ===== PayPal ===== */
   paypalCreate: (payload) =>
     request("/payments/paypal/create", { method: "POST", body: payload, withCredentials: true }),
   paypalCapture: (payload) =>
     request("/payments/paypal/capture", { method: "POST", body: payload, withCredentials: true }),
 
-  /* ===== Stripe ===== */
   stripeCheckout: (payload) =>
     request("/payments/stripe/checkout", { method: "POST", body: payload, withCredentials: true }),
 

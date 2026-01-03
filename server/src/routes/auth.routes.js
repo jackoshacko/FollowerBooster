@@ -6,31 +6,38 @@ import rateLimit from "express-rate-limit";
 
 import { User } from "../models/User.js";
 import { RefreshSession } from "../models/RefreshSession.js";
-import {
-  signAccessTokenForUser,
-  signRefreshToken,
-  hashToken,
-} from "../utils/tokens.js";
+import { signAccessTokenForUser, signRefreshToken, hashToken } from "../utils/tokens.js";
 import { requireAuth } from "../middlewares/auth.js";
 
 import authGoogleRoutes from "./auth.google.routes.js";
 
 const router = Router();
 
+/* =========================
+   helpers
+========================= */
+
 function safeStr(x) {
   return String(x ?? "").trim();
 }
+
 function isHttpsReq(req) {
   const proto = safeStr(req.headers["x-forwarded-proto"]).toLowerCase();
   return !!req.secure || proto.includes("https");
 }
 
-const authLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  limit: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+function boolEnv(name, def = false) {
+  const v = safeStr(process.env[name]).toLowerCase();
+  if (!v) return def;
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
+function splitCsv(v) {
+  return safeStr(v)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function cookieOpts(req) {
   const secure = isHttpsReq(req);
@@ -43,52 +50,92 @@ function cookieOpts(req) {
 }
 
 /* =========================
-   TURNSTILE VERIFY
+   rate limit
 ========================= */
 
-async function verifyTurnstile(req, token) {
-  // Ako nema secret-a u env -> fail SAFE (bolje da ne pušta)
-  const secret = safeStr(process.env.TURNSTILE_SECRET_KEY);
-  if (!secret) {
-    return { ok: false, reason: "TURNSTILE_SECRET_KEY missing" };
+const authLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/* =========================
+   Cloudflare Turnstile verify
+   - only for /login and /register
+   - NEVER for Google oauth routes
+========================= */
+
+const TURNSTILE_ENABLED = boolEnv("TURNSTILE_ENABLED", false);
+// if true, skip Turnstile on localhost (dev)
+const TURNSTILE_DISABLE_LOCAL = boolEnv("TURNSTILE_DISABLE_LOCAL", true);
+
+function isLocalRequest(req) {
+  const host = safeStr(req.headers.host).toLowerCase();
+  const origin = safeStr(req.headers.origin).toLowerCase();
+  return (
+    host.includes("localhost") ||
+    host.includes("127.0.0.1") ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1")
+  );
+}
+
+async function verifyTurnstile(req, turnstileToken) {
+  // If not enabled -> ok
+  if (!TURNSTILE_ENABLED) return { ok: true, skipped: true };
+
+  // allow skip on local if configured
+  if (TURNSTILE_DISABLE_LOCAL && isLocalRequest(req)) {
+    return { ok: true, skipped: true };
   }
 
-  const t = safeStr(token);
-  if (!t) {
-    return { ok: false, reason: "Missing turnstile token" };
+  const secret = safeStr(process.env.TURNSTILE_SECRET_KEY);
+  if (!secret) {
+    return { ok: false, reason: "TURNSTILE_SECRET_KEY missing on server" };
+  }
+
+  const token = safeStr(turnstileToken);
+  if (!token) {
+    return { ok: false, reason: "turnstile required" };
   }
 
   // Cloudflare endpoint
-  const form = new URLSearchParams();
-  form.set("secret", secret);
-  form.set("response", t);
+  const body = new URLSearchParams();
+  body.set("secret", secret);
+  body.set("response", token);
 
-  // (opciono, ali ok): ip
-  const ip =
-    safeStr(req.headers["cf-connecting-ip"]) ||
-    safeStr(req.headers["x-forwarded-for"])?.split(",")[0] ||
-    safeStr(req.ip);
-  if (ip) form.set("remoteip", ip);
+  // optional remoteip
+  const ip = safeStr(req.headers["cf-connecting-ip"]) || safeStr(req.ip);
+  if (ip) body.set("remoteip", ip);
 
+  let out = null;
   try {
     const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: form,
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
     });
-
-    const data = await resp.json().catch(() => null);
-
-    if (!data || data.success !== true) {
-      // Vrati reason radi debug-a (ne previše detalja)
-      const codes = Array.isArray(data?.["error-codes"]) ? data["error-codes"].join(",") : "";
-      return { ok: false, reason: codes || "Turnstile verify failed" };
-    }
-
-    return { ok: true };
+    out = await resp.json();
   } catch (e) {
-    return { ok: false, reason: e?.message || "Turnstile request failed" };
+    return { ok: false, reason: "turnstile verify network error" };
   }
+
+  // out: { success, challenge_ts, hostname, "error-codes": [] }
+  if (!out?.success) {
+    const codes = Array.isArray(out?.["error-codes"]) ? out["error-codes"].join(",") : "";
+    return { ok: false, reason: codes || "turnstile failed" };
+  }
+
+  // optional hostname allowlist
+  const allow = splitCsv(process.env.TURNSTILE_EXPECTED_HOSTNAMES);
+  if (allow.length) {
+    const h = safeStr(out?.hostname).toLowerCase();
+    const okHost = allow.some((x) => h === x.toLowerCase());
+    if (!okHost) return { ok: false, reason: `turnstile hostname mismatch (${out?.hostname || "?"})` };
+  }
+
+  return { ok: true, skipped: false, hostname: out?.hostname || "" };
 }
 
 /* =========================
@@ -100,20 +147,14 @@ router.post("/register", authLimiter, async (req, res, next) => {
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    if (!normalizedEmail || !pw) {
-      return res.status(400).json({ message: "email and password required" });
-    }
-    if (pw.length < 8) {
-      return res.status(400).json({ message: "password must be at least 8 chars" });
-    }
-
-    // ✅ Turnstile verify (REGISTER)
+    // ✅ Turnstile (only if enabled)
     const ts = await verifyTurnstile(req, turnstileToken);
-    if (!ts.ok) {
-      return res.status(400).json({ message: "Turnstile verification failed" });
-      // ako želiš debug u dev:
-      // return res.status(400).json({ message: "Turnstile verification failed", detail: ts.reason });
-    }
+    if (!ts.ok) return res.status(400).json({ message: ts.reason });
+
+    if (!normalizedEmail || !pw)
+      return res.status(400).json({ message: "email and password required" });
+    if (pw.length < 8)
+      return res.status(400).json({ message: "password must be at least 8 chars" });
 
     const exists = await User.findOne({ email: normalizedEmail });
     if (exists) return res.status(409).json({ message: "email already exists" });
@@ -130,29 +171,13 @@ router.post("/register", authLimiter, async (req, res, next) => {
       balance: 0,
     });
 
-    // opcionalno: odmah login tokeni nakon register-a
-    const accessToken = signAccessTokenForUser(user, { provider: "local" });
-    const refreshToken = signRefreshToken({ id: user._id.toString() });
-
-    await RefreshSession.create({
-      userId: user._id,
-      tokenHash: hashToken(refreshToken),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      userAgent: req.headers["user-agent"] || "",
-      ip: req.ip || "",
-    });
-
-    res.cookie("refreshToken", refreshToken, cookieOpts(req));
-
     return res.json({
-      accessToken,
+      ok: true,
       user: {
         id: user._id.toString(),
         email: user.email,
         role: user.role,
         balance: user.balance,
-        name: user.name || "",
-        avatarUrl: user.avatarUrl || "",
       },
     });
   } catch (e) {
@@ -169,24 +194,12 @@ router.post("/login", authLimiter, async (req, res, next) => {
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    if (!normalizedEmail || !pw) {
-      return res.status(400).json({ message: "email and password required" });
-    }
-
-    // ✅ Turnstile verify (LOGIN)
+    // ✅ Turnstile (only if enabled)
     const ts = await verifyTurnstile(req, turnstileToken);
-    if (!ts.ok) {
-      return res.status(400).json({ message: "Turnstile verification failed" });
-      // dev debug:
-      // return res.status(400).json({ message: "Turnstile verification failed", detail: ts.reason });
-    }
+    if (!ts.ok) return res.status(400).json({ message: ts.reason });
 
     const user = await User.findOne({ email: normalizedEmail });
-
-    // ✅ Guard: user mora postojati i imati passwordHash
-    if (!user || !user.passwordHash) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
+    if (!user) return res.status(401).json({ message: "Invalid credentials" });
 
     const ok = await bcrypt.compare(pw, user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
@@ -199,7 +212,7 @@ router.post("/login", authLimiter, async (req, res, next) => {
       tokenHash: hashToken(refreshToken),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       userAgent: req.headers["user-agent"] || "",
-      ip: req.ip || "",
+      ip: safeStr(req.headers["cf-connecting-ip"]) || req.ip || "",
     });
 
     res.cookie("refreshToken", refreshToken, cookieOpts(req));
@@ -239,7 +252,6 @@ router.post("/refresh", async (req, res) => {
 
     if (!session) return res.status(401).json({ message: "Refresh revoked" });
 
-    // rotate
     session.revokedAt = new Date();
     await session.save();
 
@@ -250,7 +262,7 @@ router.post("/refresh", async (req, res) => {
       tokenHash: hashToken(newRefresh),
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       userAgent: req.headers["user-agent"] || "",
-      ip: req.ip || "",
+      ip: safeStr(req.headers["cf-connecting-ip"]) || req.ip || "",
     });
 
     res.cookie("refreshToken", newRefresh, cookieOpts(req));
@@ -286,7 +298,10 @@ router.post("/logout", requireAuth, async (req, res, next) => {
   }
 });
 
-// ✅ mount google routes here (so /auth/google works)
+/* =========================
+   Google OAuth routes
+   ✅ Turnstile is NOT applied here
+========================= */
 router.use(authGoogleRoutes);
 
 export default router;
