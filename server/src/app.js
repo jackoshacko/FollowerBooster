@@ -8,8 +8,8 @@ import { initPassport } from "./auth/passport.js";
 
 // ================= PUBLIC ROUTES =================
 import healthRoutes from "./routes/health.routes.js";
-import authRoutes from "./routes/auth.routes.js"; // local login/register etc (NO google callback inside!)
-import authGoogleRoutes from "./routes/auth.google.routes.js"; // ✅ ONLY google routes here
+import authRoutes from "./routes/auth.routes.js"; // local login/register etc
+import authGoogleRoutes from "./routes/auth.google.routes.js"; // google oauth routes
 import servicesRoutes from "./routes/services.routes.js";
 
 // ================= USER ROUTES =================
@@ -63,11 +63,10 @@ function isAllowedByPattern(origin) {
 export function createApp({ corsOrigins = [] } = {}) {
   const app = express();
 
-  // hide framework header
   app.disable("x-powered-by");
 
   // =====================================================
-  // TRUST PROXY (ngrok / reverse proxies)
+  // TRUST PROXY (render/ngrok/reverse proxies)
   // =====================================================
   app.set("trust proxy", 1);
 
@@ -83,25 +82,23 @@ export function createApp({ corsOrigins = [] } = {}) {
     req.reqId = reqId;
     res.setHeader("x-request-id", reqId);
 
-    // small hardening (cheap + ok)
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
+
     next();
   });
 
   // =====================================================
-  // CORS (TOKEN-ONLY)
+  // CORS (FIXED for login/refresh cookies)
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
-  // ✅ prefer FRONTEND_URL (tvoj existing)
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
-  // (optional) ako nekad koristiš CLIENT_URL umesto FRONTEND_URL
   const envClient = String(process.env.CLIENT_URL || "").trim();
   if (envClient && !whitelist.includes(envClient)) whitelist.push(envClient);
 
@@ -124,11 +121,12 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      return cb(null, origin); // echo exact origin
+      // echo exact origin
+      return cb(null, origin);
     },
 
-    // ✅ TOKEN ONLY (no cookies from browser API calls)
-    credentials: false,
+    // ✅ FIX: MUST be true because frontend uses credentials:"include"
+    credentials: true,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 
@@ -151,26 +149,20 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.options("*", cors(corsOptions));
 
   // =====================================================
-  // COOKIES (needed for oauth_state CSRF cookie)
+  // COOKIES (refreshToken + oauth_state)
   // =====================================================
   app.use(cookieParser());
 
   // =====================================================
-  // ✅ PASSPORT INIT (MUST BE BEFORE /auth routes)
+  // PASSPORT INIT (BEFORE /auth routes)
   // =====================================================
   initPassport();
   app.use(passport.initialize());
 
   // =====================================================
-  // ✅ WEBHOOKS (MUST BE BEFORE JSON PARSER)
+  // WEBHOOKS (BEFORE JSON PARSER)
   // =====================================================
-  // IMPORTANT:
-  // - Stripe route ALREADY applies express.raw() inside router.post("/")
-  // - So here we only mount the router, no extra raw here (avoid double raw)
-  // Endpoint: POST /webhooks/stripe
   app.use("/webhooks/stripe", stripeWebhooksRoutes);
-
-  // PayPal webhooks (existing)
   app.use("/webhooks", paypalWebhooksRoutes);
 
   // =====================================================
@@ -206,11 +198,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   app.use("/health", healthRoutes);
 
-  // ✅ IMPORTANT ORDER:
-  // 1) mount Google OAuth routes FIRST
+  // IMPORTANT ORDER:
+  // 1) google oauth first
   app.use("/auth", authGoogleRoutes);
-
-  // 2) then mount normal auth routes
+  // 2) then normal auth
   app.use("/auth", authRoutes);
 
   // public
@@ -225,8 +216,6 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   // payments
   app.use("/payments/paypal", paypalPaymentsRoutes);
-
-  // ✅ STRIPE payments
   app.use("/payments/stripe", stripePaymentsRoutes);
 
   // admin
