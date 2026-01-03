@@ -18,7 +18,6 @@ export function getToken() {
 function normalizeToken(token) {
   const t = String(token || "").trim();
   if (!t) return "";
-  // if token comes as "Bearer xxx", store only raw
   if (/^bearer\s+/i.test(t)) return t.replace(/^bearer\s+/i, "").trim();
   return t;
 }
@@ -58,10 +57,9 @@ export function clearAuthLocal() {
 }
 
 /* ================= ROUTE GUARDS ================= */
-// ✅ PUBLIC rute (ovde obavezno /services i ostalo)
 const PUBLIC_PREFIXES = [
-  "/", // home
-  "/services", // public catalog
+  "/",
+  "/services",
   "/faq",
   "/contact",
   "/terms",
@@ -79,9 +77,8 @@ function isPublicPath(pathname) {
   return PUBLIC_PREFIXES.some((x) => x !== "/" && p.startsWith(x));
 }
 
-// ✅ PROTECTED rute — NAJBITNIJE: /app (jer ti je /app/dashboard)
 const PROTECTED_PREFIXES = [
-  "/app", // ✅ fix: tvoje authed stranice su ovde
+  "/app",
   "/dashboard",
   "/create-order",
   "/orders",
@@ -98,7 +95,6 @@ function redirectToLogin() {
   if (typeof window === "undefined") return;
 
   const path = window.location.pathname || "/";
-  // samo ako smo na protected ruti
   if (!isProtectedPath(path)) return;
 
   if (path !== "/login") {
@@ -127,10 +123,7 @@ async function readResponse(res) {
       }
     } else {
       const t = text.trim();
-      if (
-        (t.startsWith("{") && t.endsWith("}")) ||
-        (t.startsWith("[") && t.endsWith("]"))
-      ) {
+      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
         try {
           json = JSON.parse(t);
         } catch {
@@ -161,7 +154,7 @@ function apiLooksNgrok() {
 function buildAuthHeader(token) {
   const t = String(token || "").trim();
   if (!t) return null;
-  if (/^bearer\s+/i.test(t)) return t; // already "Bearer ..."
+  if (/^bearer\s+/i.test(t)) return t;
   return `Bearer ${t}`;
 }
 
@@ -187,6 +180,7 @@ export async function request(path, options = {}) {
   const isBlob = typeof Blob !== "undefined" && body instanceof Blob;
   const isString = typeof body === "string";
 
+  // ✅ ako je body objekat, mora JSON.stringify
   const finalBody =
     !hasBody ? undefined : isForm || isBlob || isString ? body : JSON.stringify(body);
 
@@ -195,9 +189,7 @@ export async function request(path, options = {}) {
   const headers = {
     Accept: "application/json",
     ...(authHeader ? { Authorization: authHeader } : {}),
-    ...(hasBody && !(isForm || isBlob) && !isString
-      ? { "Content-Type": "application/json" }
-      : {}),
+    ...(hasBody && !(isForm || isBlob) && !isString ? { "Content-Type": "application/json" } : {}),
     ...(extraHeaders || {}),
   };
 
@@ -205,6 +197,7 @@ export async function request(path, options = {}) {
     headers["ngrok-skip-browser-warning"] = "true";
   }
 
+  // ✅ auth flow (refresh cookie) -> include
   const credentialsMode =
     withCredentials === true || isSameOriginApi() ? "include" : "omit";
 
@@ -214,30 +207,30 @@ export async function request(path, options = {}) {
     headers,
     body: method === "GET" || method === "HEAD" ? undefined : finalBody,
     credentials: credentialsMode,
+    // mode: "cors", // može i bez, default je ok; ostavljam kompatibilno:
     mode: "cors",
+    cache: "no-store",
+    redirect: "follow",
   });
 
   const { json, text, contentType } = await readResponse(res);
 
-  // ngrok / wrong URL / proxy -> HTML
+  // HTML umesto JSON (ngrok warning / proxy / wrong URL)
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
     const err = new Error(
-      `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(
-        path
-      )}`
+      `API returned HTML instead of JSON.\nURL: ${apiUrl(path)}`
     );
     err.status = res.status;
     err.data = { text };
     throw err;
   }
 
-  // ✅ FIX: 401 više NE briše token svuda
+  // ✅ 401 handling: ne brisi token svuda, samo na protected
   if (res.status === 401) {
     const err = new Error(pickErrorMessage(json, "Unauthorized"));
     err.status = 401;
     err.data = json ?? { text };
 
-    // samo ako smo na protected ruti -> tek tad smemo da očistimo + redirect
     if (typeof window !== "undefined") {
       const cur = window.location.pathname || "/";
       if (isProtectedPath(cur)) {
@@ -252,7 +245,7 @@ export async function request(path, options = {}) {
   if (!res.ok) {
     const fallbackText =
       contentType.includes("text") || contentType.includes("html")
-        ? (text || "").slice(0, 300)
+        ? (text || "").slice(0, 500)
         : "";
 
     const err = new Error(
@@ -260,6 +253,13 @@ export async function request(path, options = {}) {
     );
     err.status = res.status;
     err.data = json ?? { text };
+
+    // ✅ debug helper (lakše da vidiš backend message)
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line no-console
+      console.log("[API ERROR]", method, apiUrl(path), err.status, err.data);
+    }
+
     throw err;
   }
 
@@ -285,6 +285,10 @@ function extractUser(out) {
   return out?.user || out?.data?.user || null;
 }
 
+function cleanStr(x) {
+  return String(x || "").trim();
+}
+
 /* ================= API WRAPPER ================= */
 export const api = {
   get: (p) => request(p),
@@ -293,10 +297,22 @@ export const api = {
   patch: (p, b) => request(p, { method: "PATCH", body: b }),
   del: (p, b) => request(p, { method: "DELETE", body: b }),
 
-  me: () => request("/api/me"),
+  me: () => request("/api/me", { withCredentials: true }),
 
+  // ✅ LOGIN harden: always send clean strings + include cookies
   login: async (payload) => {
-    const out = await request("/auth/login", { method: "POST", body: payload });
+    const safe = {
+      email: cleanStr(payload?.email).toLowerCase(),
+      password: cleanStr(payload?.password),
+      turnstileToken: cleanStr(payload?.turnstileToken),
+    };
+
+    const out = await request("/auth/login", {
+      method: "POST",
+      body: safe,
+      withCredentials: true,
+    });
+
     const t = extractToken(out);
     if (t) setToken(t);
 
@@ -308,11 +324,21 @@ export const api = {
     return out;
   },
 
+  // ✅ REGISTER harden
   register: async (payload) => {
+    const safe = {
+      email: cleanStr(payload?.email).toLowerCase(),
+      password: cleanStr(payload?.password),
+      name: cleanStr(payload?.name),
+      turnstileToken: cleanStr(payload?.turnstileToken),
+    };
+
     const out = await request("/auth/register", {
       method: "POST",
-      body: payload,
+      body: safe,
+      withCredentials: true,
     });
+
     const t = extractToken(out);
     if (t) setToken(t);
 
@@ -326,39 +352,38 @@ export const api = {
 
   logoutLocal: () => {
     clearAuthLocal();
-    // ne redirectuj ako si na public; redirectToLogin sam čuva
     redirectToLogin();
   },
 
   servicesPublic: () => request("/services"),
   servicesAdmin: () => request("/admin/services"),
 
-  createService: (payload) => request("/admin/services", { method: "POST", body: payload }),
-  updateService: (id, payload) => request(`/admin/services/${id}`, { method: "PUT", body: payload }),
-  toggleService: (id) => request(`/admin/services/${id}/toggle`, { method: "PATCH" }),
+  createService: (payload) =>
+    request("/admin/services", { method: "POST", body: payload, withCredentials: true }),
+  updateService: (id, payload) =>
+    request(`/admin/services/${id}`, { method: "PUT", body: payload, withCredentials: true }),
+  toggleService: (id) =>
+    request(`/admin/services/${id}/toggle`, { method: "PATCH", withCredentials: true }),
 
-  createOrder: (payload) => request("/orders", { method: "POST", body: payload }),
-  myOrders: () => request("/orders"),
+  createOrder: (payload) =>
+    request("/orders", { method: "POST", body: payload, withCredentials: true }),
+  myOrders: () => request("/orders", { withCredentials: true }),
 
-  wallet: () => request("/wallet"),
-  dashboard: () => request("/api/dashboard"),
+  wallet: () => request("/wallet", { withCredentials: true }),
+  dashboard: () => request("/api/dashboard", { withCredentials: true }),
 
   /* ===== PayPal ===== */
   paypalCreate: (payload) =>
-    request("/payments/paypal/create", { method: "POST", body: payload }),
+    request("/payments/paypal/create", { method: "POST", body: payload, withCredentials: true }),
   paypalCapture: (payload) =>
-    request("/payments/paypal/capture", { method: "POST", body: payload }),
+    request("/payments/paypal/capture", { method: "POST", body: payload, withCredentials: true }),
 
-  /* ===== Stripe (NEW) =====
-     Stripe Checkout:
-     - backend vraća: { url }
-     - ti u page radiš: window.location.href = url
-  */
+  /* ===== Stripe ===== */
   stripeCheckout: (payload) =>
-    request("/payments/stripe/checkout", { method: "POST", body: payload }),
+    request("/payments/stripe/checkout", { method: "POST", body: payload, withCredentials: true }),
 
-  // (opciono) ako imaš endpoint da proveriš session status
-  // npr GET /payments/stripe/session?session_id=...
   stripeSession: (sessionId) =>
-    request(`/payments/stripe/session?session_id=${encodeURIComponent(sessionId || "")}`),
+    request(`/payments/stripe/session?session_id=${encodeURIComponent(sessionId || "")}`, {
+      withCredentials: true,
+    }),
 };
