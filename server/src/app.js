@@ -23,6 +23,10 @@ import walletRoutes from "./routes/wallet.routes.js";
 import paypalPaymentsRoutes from "./routes/payments.paypal.routes.js";
 import paypalWebhooksRoutes from "./routes/webhooks.paypal.routes.js";
 
+// ✅ STRIPE (USER) — NEW
+import stripePaymentsRoutes from "./routes/payments.stripe.routes.js";
+import stripeWebhooksRoutes from "./routes/webhooks.stripe.routes.js";
+
 // ================= ADMIN ROUTES =================
 import adminRoutes from "./routes/admin.routes.js";
 import adminServicesRoutes from "./routes/admin.services.routes.js";
@@ -150,9 +154,14 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use(passport.initialize());
 
   // =====================================================
-  // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
+  // ✅ WEBHOOKS (MUST BE BEFORE JSON PARSER)
   // =====================================================
+  // PayPal webhooks (existing)
   app.use("/webhooks", paypalWebhooksRoutes);
+
+  // Stripe webhook (NEW) — raw body handled inside stripeWebhooksRoutes
+  // Endpoint: POST /webhooks/stripe
+  app.use("/webhooks/stripe", stripeWebhooksRoutes);
 
   // =====================================================
   // BODY PARSERS
@@ -173,6 +182,10 @@ export function createApp({ corsOrigins = [] } = {}) {
       corsWhitelist: whitelist,
       routes: {
         google: "/auth/google  -> /auth/google/callback",
+        stripe: {
+          createIntent: "/payments/stripe/create-intent",
+          webhook: "/webhooks/stripe",
+        },
       },
     });
   });
@@ -201,6 +214,10 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   // payments
   app.use("/payments/paypal", paypalPaymentsRoutes);
+
+  // ✅ STRIPE payments (NEW)
+  // Endpoint: POST /payments/stripe/create-intent
+  app.use("/payments/stripe", stripePaymentsRoutes);
 
   // admin
   app.use("/admin", adminRoutes);
