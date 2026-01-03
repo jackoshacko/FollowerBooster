@@ -62,12 +62,9 @@ const authLimiter = rateLimit({
 
 /* =========================
    Cloudflare Turnstile verify
-   - only for /login and /register
-   - NEVER for Google oauth routes
 ========================= */
 
 const TURNSTILE_ENABLED = boolEnv("TURNSTILE_ENABLED", false);
-// if true, skip Turnstile on localhost (dev)
 const TURNSTILE_DISABLE_LOCAL = boolEnv("TURNSTILE_DISABLE_LOCAL", true);
 
 function isLocalRequest(req) {
@@ -82,30 +79,22 @@ function isLocalRequest(req) {
 }
 
 async function verifyTurnstile(req, turnstileToken) {
-  // If not enabled -> ok
   if (!TURNSTILE_ENABLED) return { ok: true, skipped: true };
 
-  // allow skip on local if configured
   if (TURNSTILE_DISABLE_LOCAL && isLocalRequest(req)) {
     return { ok: true, skipped: true };
   }
 
   const secret = safeStr(process.env.TURNSTILE_SECRET_KEY);
-  if (!secret) {
-    return { ok: false, reason: "TURNSTILE_SECRET_KEY missing on server" };
-  }
+  if (!secret) return { ok: false, reason: "TURNSTILE_SECRET_KEY missing on server" };
 
   const token = safeStr(turnstileToken);
-  if (!token) {
-    return { ok: false, reason: "turnstile required" };
-  }
+  if (!token) return { ok: false, reason: "turnstile required" };
 
-  // Cloudflare endpoint
   const body = new URLSearchParams();
   body.set("secret", secret);
   body.set("response", token);
 
-  // optional remoteip
   const ip = safeStr(req.headers["cf-connecting-ip"]) || safeStr(req.ip);
   if (ip) body.set("remoteip", ip);
 
@@ -117,22 +106,22 @@ async function verifyTurnstile(req, turnstileToken) {
       body,
     });
     out = await resp.json();
-  } catch (e) {
+  } catch {
     return { ok: false, reason: "turnstile verify network error" };
   }
 
-  // out: { success, challenge_ts, hostname, "error-codes": [] }
   if (!out?.success) {
     const codes = Array.isArray(out?.["error-codes"]) ? out["error-codes"].join(",") : "";
     return { ok: false, reason: codes || "turnstile failed" };
   }
 
-  // optional hostname allowlist
   const allow = splitCsv(process.env.TURNSTILE_EXPECTED_HOSTNAMES);
   if (allow.length) {
     const h = safeStr(out?.hostname).toLowerCase();
     const okHost = allow.some((x) => h === x.toLowerCase());
-    if (!okHost) return { ok: false, reason: `turnstile hostname mismatch (${out?.hostname || "?"})` };
+    if (!okHost) {
+      return { ok: false, reason: `turnstile hostname mismatch (${out?.hostname || "?"})` };
+    }
   }
 
   return { ok: true, skipped: false, hostname: out?.hostname || "" };
@@ -147,14 +136,15 @@ router.post("/register", authLimiter, async (req, res, next) => {
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    // ✅ Turnstile (only if enabled)
     const ts = await verifyTurnstile(req, turnstileToken);
     if (!ts.ok) return res.status(400).json({ message: ts.reason });
 
-    if (!normalizedEmail || !pw)
+    if (!normalizedEmail || !pw) {
       return res.status(400).json({ message: "email and password required" });
-    if (pw.length < 8)
+    }
+    if (pw.length < 8) {
       return res.status(400).json({ message: "password must be at least 8 chars" });
+    }
 
     const exists = await User.findOne({ email: normalizedEmail });
     if (exists) return res.status(409).json({ message: "email already exists" });
@@ -194,12 +184,23 @@ router.post("/login", authLimiter, async (req, res, next) => {
     const normalizedEmail = safeStr(email).toLowerCase();
     const pw = String(password || "");
 
-    // ✅ Turnstile (only if enabled)
+    // ✅ basic validation first (pre nego bcrypt)
+    if (!normalizedEmail || !pw) {
+      return res.status(400).json({ message: "email and password required" });
+    }
+
     const ts = await verifyTurnstile(req, turnstileToken);
     if (!ts.ok) return res.status(400).json({ message: ts.reason });
 
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
+
+    // ✅ FIX: ako je Google user ili nema passwordHash -> bcrypt puca sa “data and hash arguments required”
+    if (!user.passwordHash) {
+      return res.status(401).json({
+        message: "This account has no password. Use Google login or reset password.",
+      });
+    }
 
     const ok = await bcrypt.compare(pw, user.passwordHash);
     if (!ok) return res.status(401).json({ message: "Invalid credentials" });
@@ -300,7 +301,6 @@ router.post("/logout", requireAuth, async (req, res, next) => {
 
 /* =========================
    Google OAuth routes
-   ✅ Turnstile is NOT applied here
 ========================= */
 router.use(authGoogleRoutes);
 

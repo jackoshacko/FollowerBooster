@@ -9,7 +9,7 @@ import { initPassport } from "./auth/passport.js";
 // ================= PUBLIC ROUTES =================
 import healthRoutes from "./routes/health.routes.js";
 import authRoutes from "./routes/auth.routes.js"; // local login/register etc
-import authGoogleRoutes from "./routes/auth.google.routes.js"; // google routes
+import authGoogleRoutes from "./routes/auth.google.routes.js"; // google only
 import servicesRoutes from "./routes/services.routes.js";
 
 // ================= USER ROUTES =================
@@ -22,6 +22,10 @@ import walletRoutes from "./routes/wallet.routes.js";
 // ================= PAYMENTS (USER) =================
 import paypalPaymentsRoutes from "./routes/payments.paypal.routes.js";
 import paypalWebhooksRoutes from "./routes/webhooks.paypal.routes.js";
+
+// ✅ STRIPE (USER)
+import stripePaymentsRoutes from "./routes/payments.stripe.routes.js";
+import stripeWebhooksRoutes from "./routes/webhooks.stripe.routes.js";
 
 // ================= ADMIN ROUTES =================
 import adminRoutes from "./routes/admin.routes.js";
@@ -59,11 +63,10 @@ function isAllowedByPattern(origin) {
 export function createApp({ corsOrigins = [] } = {}) {
   const app = express();
 
-  // hide framework header
   app.disable("x-powered-by");
 
   // =====================================================
-  // TRUST PROXY (Render/Cloudflare/ngrok reverse proxy)
+  // TRUST PROXY (Render/Cloudflare/ngrok)
   // =====================================================
   app.set("trust proxy", 1);
 
@@ -86,21 +89,18 @@ export function createApp({ corsOrigins = [] } = {}) {
   });
 
   // =====================================================
-  // CORS (✅ MUST SUPPORT credentials for refreshToken cookie)
+  // CORS (✅ allow credentials for browser fetch with cookies)
   // =====================================================
   const whitelist = Array.isArray(corsOrigins)
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
-  // Prefer FRONTEND_URL (your existing)
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
 
-  // Optional CLIENT_URL support
   const envClient = String(process.env.CLIENT_URL || "").trim();
   if (envClient && !whitelist.includes(envClient)) whitelist.push(envClient);
 
-  // MUST vary by origin
   app.use((req, res, next) => {
     res.setHeader("Vary", "Origin");
     next();
@@ -108,7 +108,6 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   const corsOptions = {
     origin(origin, cb) {
-      // server-to-server / curl has no origin -> allow
       if (!origin) return cb(null, true);
       if (origin === "null") return cb(new Error("CORS: null origin"));
 
@@ -119,11 +118,11 @@ export function createApp({ corsOrigins = [] } = {}) {
         return cb(new Error("Not allowed by CORS: " + origin));
       }
 
-      // ✅ IMPORTANT: return exact origin (NOT true) when using credentials
+      // ✅ echo exact origin (required for credentials)
       return cb(null, origin);
     },
 
-    // ✅ THIS IS THE FIX (because login sets refreshToken cookie)
+    // ✅ IMPORTANT: this fixes your “CORS Missing Allow Credentials”
     credentials: true,
 
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -146,26 +145,21 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use(cors(corsOptions));
   app.options("*", cors(corsOptions));
 
-  // ✅ extra hard-force (Render + Cloudflare sometimes needs this explicit)
-  app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    next();
-  });
-
   // =====================================================
-  // COOKIES (needed for refreshToken + oauth_state)
+  // COOKIES (oauth_state + refreshToken)
   // =====================================================
   app.use(cookieParser());
 
   // =====================================================
-  // ✅ PASSPORT INIT (MUST BE BEFORE /auth routes)
+  // PASSPORT INIT
   // =====================================================
   initPassport();
   app.use(passport.initialize());
 
   // =====================================================
-  // PAYPAL WEBHOOKS (MUST BE BEFORE JSON PARSER)
+  // WEBHOOKS (BEFORE JSON)
   // =====================================================
+  app.use("/webhooks/stripe", stripeWebhooksRoutes);
   app.use("/webhooks", paypalWebhooksRoutes);
 
   // =====================================================
@@ -187,6 +181,11 @@ export function createApp({ corsOrigins = [] } = {}) {
       corsWhitelist: whitelist,
       routes: {
         google: "/auth/google  -> /auth/google/callback",
+        stripe: {
+          payments: "/payments/stripe/*",
+          webhook: "/webhooks/stripe",
+          ping: "/webhooks/stripe/ping",
+        },
       },
     });
   });
@@ -196,11 +195,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   app.use("/health", healthRoutes);
 
-  // ✅ IMPORTANT ORDER:
-  // 1) Google OAuth routes first
+  // 1) google first
   app.use("/auth", authGoogleRoutes);
 
-  // 2) then normal auth routes
+  // 2) then local auth
   app.use("/auth", authRoutes);
 
   // public
@@ -215,6 +213,7 @@ export function createApp({ corsOrigins = [] } = {}) {
 
   // payments
   app.use("/payments/paypal", paypalPaymentsRoutes);
+  app.use("/payments/stripe", stripePaymentsRoutes);
 
   // admin
   app.use("/admin", adminRoutes);
