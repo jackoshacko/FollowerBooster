@@ -48,7 +48,7 @@
       rel="stylesheet"
     />
 
-    <!-- ✅ Cloudflare Turnstile -->
+    <!-- ✅ Cloudflare Turnstile (load once globally) -->
     <script
       src="https://challenges.cloudflare.com/turnstile/v0/api.js"
       async
@@ -71,8 +71,6 @@
 
   <body>
     <div id="root"></div>
-
-    <!-- Vite entry -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
