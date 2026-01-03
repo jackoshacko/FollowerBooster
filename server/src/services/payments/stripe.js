@@ -1,4 +1,3 @@
-// server/src/services/payments/stripe.js
 import Stripe from "stripe";
 import mongoose from "mongoose";
 import { User } from "../../models/User.js";
@@ -49,31 +48,181 @@ function nowPlusDays(days) {
 }
 
 function getMode() {
-  // if you later set STRIPE_MODE=live/test you can use it here
   const nodeEnv = safeLower(process.env.NODE_ENV);
   return nodeEnv === "production" ? "live" : "sandbox";
+}
+
+function getClientUrlFallback() {
+  // checkout needs redirect url
+  const a = safeStr(process.env.CLIENT_URL);
+  const b = safeStr(process.env.FRONTEND_URL);
+  return (a || b || "").replace(/\/$/, "");
 }
 
 /* ================= STRIPE CLIENT ================= */
 
 function getStripe() {
-  // IMPORTANT: Use official Stripe apiVersion supported by your stripe package
-  // Your earlier "2024-06-20" might be ok, but if Stripe rejects it, update.
   return new Stripe(mustEnv("STRIPE_SECRET_KEY"), {
     apiVersion: "2024-06-20",
   });
 }
 
 /* =================================================
+   ✅ NEW: CREATE CHECKOUT SESSION (TOPUP)
+   POST /payments/stripe/checkout
+   returns: { id, url }
+================================================= */
+export async function createStripeCheckoutSession({
+  userId,
+  amountCents,
+  currency = "eur",
+  reqId,
+  clientUrl,
+}) {
+  const stripe = getStripe();
+
+  const u = safeStr(userId);
+  if (!isObjectId(u)) throw new Error("Invalid userId");
+
+  const cents = asInt(amountCents);
+  if (!Number.isInteger(cents) || cents <= 0) {
+    throw new Error("amountCents must be positive integer");
+  }
+
+  const cur = safeLower(currency) || "eur";
+  const rid = safeStr(reqId) || String(Date.now());
+
+  // policy
+  const MIN = 50; // 0.50
+  const MAX = 500000; // 5,000.00
+  if (cents < MIN || cents > MAX) {
+    throw new Error(`Topup out of range (${MIN}-${MAX} cents)`);
+  }
+
+  const baseUrl = (safeStr(clientUrl) || getClientUrlFallback()).replace(/\/$/, "");
+  if (!baseUrl) throw new Error("CLIENT_URL/FRONTEND_URL missing (needed for checkout redirect)");
+
+  // 1) pending tx (ledger)
+  const pendingTx = await Transaction.create({
+    userId: u,
+    type: "topup",
+    status: "pending",
+    amount: centsToMajor(cents),
+    currency: cur.toUpperCase(),
+    provider: "stripe",
+    meta: {
+      purpose: "wallet_topup",
+      amountCents: cents,
+      reqId: rid,
+      flow: "checkout",
+    },
+  });
+
+  // 2) Stripe Checkout Session
+  // IMPORTANT: put metadata on payment_intent_data so payment_intent.succeeded has it
+  const idempotencyKey = `stripe-checkout-${u}-${cents}-${rid}`;
+
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: cur,
+            unit_amount: cents,
+            product_data: {
+              name: "Wallet Top-up",
+              description: `Top-up ${centsToMajor(cents)} ${cur.toUpperCase()}`,
+            },
+          },
+        },
+      ],
+
+      // redirect back to your frontend
+      success_url: `${baseUrl}/wallet?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/wallet?stripe=cancel`,
+
+      // attach metadata to the PaymentIntent created by Checkout
+      payment_intent_data: {
+        metadata: {
+          userId: u,
+          purpose: "wallet_topup",
+          topupId: String(pendingTx._id),
+          reqId: rid,
+        },
+      },
+
+      // also store on session itself (handy for debugging)
+      metadata: {
+        userId: u,
+        purpose: "wallet_topup",
+        topupId: String(pendingTx._id),
+        reqId: rid,
+      },
+
+      // get PI id immediately (useful)
+      expand: ["payment_intent"],
+    },
+    { idempotencyKey }
+  );
+
+  // 3) save session / PI ids (if available)
+  const piId = safeStr(session?.payment_intent?.id || session?.payment_intent || "");
+  pendingTx.meta = {
+    ...(pendingTx.meta || {}),
+    checkoutSessionId: safeStr(session.id),
+    checkoutUrl: safeStr(session.url),
+    paymentIntentId: piId || "",
+  };
+
+  // keep providerOrderId consistent:
+  // - for checkout we store session.id (and we also store paymentIntentId in meta)
+  pendingTx.providerOrderId = safeStr(session.id);
+  await pendingTx.save();
+
+  return { id: session.id, url: session.url };
+}
+
+/* =================================================
+   ✅ NEW: GET CHECKOUT SESSION
+   GET /payments/stripe/session?session_id=...
+================================================= */
+export async function getStripeCheckoutSession(sessionId) {
+  const stripe = getStripe();
+  const sid = safeStr(sessionId);
+  if (!sid) throw new Error("sessionId missing");
+
+  const session = await stripe.checkout.sessions.retrieve(sid, {
+    expand: ["payment_intent"],
+  });
+
+  // return a safe subset
+  const pi = session?.payment_intent;
+  return {
+    id: safeStr(session?.id),
+    status: safeStr(session?.status),
+    payment_status: safeStr(session?.payment_status),
+    amount_total: asInt(session?.amount_total ?? 0),
+    currency: safeStr(session?.currency || ""),
+    payment_intent: pi
+      ? {
+          id: safeStr(pi?.id || ""),
+          status: safeStr(pi?.status || ""),
+          amount_received: asInt(pi?.amount_received ?? 0),
+          currency: safeStr(pi?.currency || ""),
+          metadata: pi?.metadata || {},
+        }
+      : null,
+    metadata: session?.metadata || {},
+  };
+}
+
+/* =================================================
    CREATE PAYMENT INTENT (TOPUP)
    POST /payments/stripe/create-intent
 ================================================= */
-/**
- * Creates:
- * 1) Pending Transaction (type="topup", status="pending")  -> ledger reservation / tracking
- * 2) Stripe PaymentIntent                                 -> actual payment
- * Webhook confirms + credits wallet (type="topup_credit")
- */
 export async function createStripePaymentIntent({
   userId,
   amountCents,
@@ -112,6 +261,7 @@ export async function createStripePaymentIntent({
       purpose: "wallet_topup",
       amountCents: cents,
       reqId: rid,
+      flow: "intent",
     },
   });
 
@@ -124,7 +274,6 @@ export async function createStripePaymentIntent({
       currency: cur,
       automatic_payment_methods: { enabled: true },
 
-      // Important: metadata = how webhook knows user + topup tx
       metadata: {
         userId: u,
         purpose: "wallet_topup",
@@ -153,7 +302,6 @@ export async function createStripePaymentIntent({
 /* =================================================
    STRIPE WEBHOOK
    POST /webhooks/stripe
-   MUST BE mounted with express.raw({type:"application/json"})
 ================================================= */
 
 export async function handleStripeWebhook(req, res) {
@@ -166,7 +314,6 @@ export async function handleStripeWebhook(req, res) {
 
   let event;
   try {
-    // req.body MUST be raw Buffer here
     event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
   } catch (err) {
     console.error("❌ Stripe signature verification failed:", err?.message || err);
@@ -186,7 +333,7 @@ export async function handleStripeWebhook(req, res) {
       resourceId,
       mode: getMode(),
       status: "received",
-      payload: event, // you can store subset if you want smaller db
+      payload: event,
       headers: {
         "stripe-signature": safeStr(signature),
         "user-agent": safeStr(req.headers["user-agent"]),
@@ -195,11 +342,9 @@ export async function handleStripeWebhook(req, res) {
         "x-real-ip": safeStr(req.headers["x-real-ip"]),
         host: safeStr(req.headers["host"]),
       },
-      // optional: keep 30 days then ttl (if you enabled TTL index)
       // expiresAt: nowPlusDays(30),
     });
   } catch (e) {
-    // duplicate event => already received/processed => ACK 200
     if (String(e?.code) === "11000") {
       return res.status(200).json({ received: true, deduped: true });
     }
@@ -220,7 +365,6 @@ export async function handleStripeWebhook(req, res) {
       const userId = safeStr(pi?.metadata?.userId);
       const topupId = safeStr(pi?.metadata?.topupId);
 
-      // amount_received is best
       const amountCents = asInt(pi?.amount_received ?? pi?.amount ?? 0);
       const amountMajor = centsToMajor(amountCents);
       const currency = safeStr(pi?.currency || "eur").toUpperCase();
@@ -237,7 +381,6 @@ export async function handleStripeWebhook(req, res) {
       if (!paymentIntentId) throw new Error("Missing paymentIntentId");
       if (!Number.isFinite(amountMajor) || amountMajor <= 0) throw new Error("Invalid amount");
 
-      // Atomic credit
       const session = await mongoose.startSession();
       try {
         await session.withTransaction(async () => {
@@ -246,10 +389,6 @@ export async function handleStripeWebhook(req, res) {
 
           const balanceBefore = round2(user.balance);
 
-          // 🔒 Transaction idempotency:
-          // - providerEventId unique (partial)
-          // - providerOrderId unique (optional)
-          // If webhook retries, this create throws E11000 -> OK.
           await Transaction.create(
             [
               {
@@ -274,7 +413,6 @@ export async function handleStripeWebhook(req, res) {
             { session }
           );
 
-          // update user balance
           user.balance = round2(balanceBefore + amountMajor);
           await user.save({ session });
 
@@ -286,7 +424,7 @@ export async function handleStripeWebhook(req, res) {
                 $set: {
                   status: "confirmed",
                   confirmedAt: new Date(),
-                  providerOrderId: paymentIntentId,
+                  // keep both
                   providerEventId: eventId,
                   "meta.paymentIntentId": paymentIntentId,
                 },
@@ -294,16 +432,23 @@ export async function handleStripeWebhook(req, res) {
               { session }
             );
           } else {
-            // fallback: match pending by providerOrderId if topupId missing
+            // fallback: match pending by paymentIntentId if it was stored
             await Transaction.updateOne(
-              { userId, provider: "stripe", providerOrderId: paymentIntentId, status: "pending" },
+              {
+                userId,
+                provider: "stripe",
+                status: "pending",
+                $or: [
+                  { providerOrderId: paymentIntentId }, // intent flow
+                  { "meta.paymentIntentId": paymentIntentId }, // checkout flow
+                ],
+              },
               { $set: { status: "confirmed", confirmedAt: new Date(), providerEventId: eventId } },
               { session }
             );
           }
         });
       } catch (err) {
-        // duplicate processing is OK
         if (String(err?.code) === "11000") {
           await WebhookEvent.updateOne(
             { provider: "stripe", eventId },
@@ -332,7 +477,14 @@ export async function handleStripeWebhook(req, res) {
       const paymentIntentId = safeStr(pi?.id);
 
       await Transaction.updateOne(
-        { provider: "stripe", providerOrderId: paymentIntentId, status: "pending" },
+        {
+          provider: "stripe",
+          status: "pending",
+          $or: [
+            { providerOrderId: paymentIntentId },
+            { "meta.paymentIntentId": paymentIntentId },
+          ],
+        },
         { $set: { status: "failed" } }
       );
 
@@ -365,10 +517,7 @@ export async function handleStripeWebhook(req, res) {
       }
     );
 
-    // IMPORTANT:
-    // - If you return 500, Stripe will retry (can be useful).
-    // - If you return 200, Stripe stops retry but you have failure logged.
-    // I recommend 500 in early dev to force retries until bug fixed.
+    // In dev better 500 so Stripe retries
     return res.status(500).json({ received: false });
   }
 }
