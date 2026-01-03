@@ -4,19 +4,32 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 /**
- * TRANSACTION MODEL (Full austattung)
+ * TRANSACTION MODEL (Full ausgestattet + safe)
  *
  * One model for:
- * - Wallet topup (PayPal/Crypto/Revolut) -> credit (+)
+ * - Wallet topup (PayPal/Stripe/Crypto/Revolut) -> credit (+)
  * - Order debit (wallet/internal) -> debit (-)
  * - Refund -> credit (+)
  * - Admin adjustment (+/-)
  *
  * Notes:
  * - amount can be + or -
- * - wallet/internal tx have empty provider IDs
+ * - provider refs optional (empty string allowed)
  * - idempotency indexes are PARTIAL to avoid E11000 for empty strings
  */
+
+function safeStr(x) {
+  return String(x || "").trim();
+}
+function round2(n) {
+  const x = Number(n || 0);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
+}
+
+const PROVIDERS = ["paypal", "stripe", "crypto", "revolut", "wallet", "internal"];
+const TYPES = ["topup", "topup_credit", "order", "order_debit", "refund", "adjustment"];
+const STATUSES = ["pending", "confirmed", "failed", "expired", "refunded"];
 
 const TransactionSchema = new Schema(
   {
@@ -32,37 +45,25 @@ const TransactionSchema = new Schema(
      */
     type: {
       type: String,
-      enum: [
-        "topup",
-        "topup_credit",
-        "order",
-        "order_debit",
-        "refund",
-        "adjustment",
-      ],
+      enum: TYPES,
       required: true,
       index: true,
     },
 
     /**
      * STATUS
-     * - pending: not final yet
-     * - confirmed: booked / credited / debited
-     * - failed: failed attempt
-     * - expired: timed out / abandoned
-     * - refunded: optional future (refund after confirmed)
      */
     status: {
       type: String,
-      enum: ["pending", "confirmed", "failed", "expired", "refunded"],
+      enum: STATUSES,
       default: "pending",
       index: true,
     },
 
     /**
      * amount:
-     * - can be + or -
-     * - normalized to 2 decimals in pre-save hook
+     * - + credit
+     * - - debit
      */
     amount: { type: Number, required: true },
 
@@ -74,12 +75,12 @@ const TransactionSchema = new Schema(
 
     /**
      * provider:
-     * - external: paypal / crypto / revolut
+     * - external: paypal / stripe / crypto / revolut
      * - internal: wallet / internal
      */
     provider: {
       type: String,
-      enum: ["paypal", "crypto", "revolut", "wallet", "internal"],
+      enum: PROVIDERS,
       required: true,
       index: true,
     },
@@ -91,7 +92,10 @@ const TransactionSchema = new Schema(
     balanceAfter: { type: Number, default: null },
 
     /**
-     * Provider refs (PayPal etc.)
+     * Provider refs:
+     * - providerOrderId: e.g. PayPal order id / Stripe payment_intent id
+     * - providerCaptureId: e.g. PayPal capture id (Stripe usually empty)
+     * - providerEventId: webhook event id (Stripe/PayPal event.id) -> HARD idempotency
      */
     providerOrderId: { type: String, default: "", index: true },
     providerCaptureId: { type: String, default: "", index: true },
@@ -99,12 +103,11 @@ const TransactionSchema = new Schema(
 
     /**
      * When transaction became final/confirmed
-     * (super useful for dashboards + audits)
      */
     confirmedAt: { type: Date, default: null, index: true },
 
     /**
-     * meta: free JSON (orderId, serviceId, reason, debug payload...)
+     * meta: free JSON (orderId, serviceId, debug payload...)
      */
     meta: { type: Schema.Types.Mixed, default: {} },
   },
@@ -112,11 +115,43 @@ const TransactionSchema = new Schema(
 );
 
 /* =========================
+   NORMALIZE + BASIC VALIDATION
+========================= */
+TransactionSchema.pre("validate", function (next) {
+  // normalize currency
+  if (this.currency) this.currency = safeStr(this.currency).toUpperCase();
+
+  // normalize provider refs
+  this.providerOrderId = safeStr(this.providerOrderId);
+  this.providerCaptureId = safeStr(this.providerCaptureId);
+  this.providerEventId = safeStr(this.providerEventId);
+
+  // normalize numbers
+  if (typeof this.amount === "number" && Number.isFinite(this.amount)) {
+    this.amount = round2(this.amount);
+  }
+  if (typeof this.balanceBefore === "number" && Number.isFinite(this.balanceBefore)) {
+    this.balanceBefore = round2(this.balanceBefore);
+  }
+  if (typeof this.balanceAfter === "number" && Number.isFinite(this.balanceAfter)) {
+    this.balanceAfter = round2(this.balanceAfter);
+  }
+
+  // safety: confirm requires confirmedAt
+  if (this.status === "confirmed" && !this.confirmedAt) {
+    this.confirmedAt = new Date();
+  }
+
+  next();
+});
+
+/* =========================
    INDEXES (Idempotency + perf)
 ========================= */
 
 /**
  * 1) WEBHOOK EVENT ID idempotency
+ * - Unique per provider + providerEventId (Stripe/PayPal event.id)
  * - only when providerEventId != ""
  */
 TransactionSchema.index(
@@ -131,14 +166,18 @@ TransactionSchema.index(
 
 /**
  * 2) PROVIDER ORDER ID idempotency
+ * - Unique per provider + providerOrderId + type
  * - only for external providers + providerOrderId != ""
+ *
+ * Stripe: providerOrderId = payment_intent id (pi_...)
+ * PayPal: order id
  */
 TransactionSchema.index(
   { provider: 1, providerOrderId: 1, type: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      provider: { $in: ["paypal", "crypto", "revolut"] },
+      provider: { $in: ["paypal", "stripe", "crypto", "revolut"] },
       providerOrderId: { $type: "string", $ne: "" },
     },
   }
@@ -146,6 +185,7 @@ TransactionSchema.index(
 
 /**
  * 3) PROVIDER CAPTURE ID idempotency
+ * - PayPal capture id etc.
  * - only for external providers + providerCaptureId != ""
  */
 TransactionSchema.index(
@@ -163,21 +203,7 @@ TransactionSchema.index(
  * 4) perf listing: wallet page + admin tx page
  */
 TransactionSchema.index({ userId: 1, createdAt: -1 });
-
-/* =========================
-   NORMALIZE NUMBERS (2 decimals)
-========================= */
-TransactionSchema.pre("save", function (next) {
-  if (typeof this.amount === "number" && Number.isFinite(this.amount)) {
-    this.amount = Math.round(this.amount * 100) / 100;
-  }
-  if (typeof this.balanceBefore === "number" && Number.isFinite(this.balanceBefore)) {
-    this.balanceBefore = Math.round(this.balanceBefore * 100) / 100;
-  }
-  if (typeof this.balanceAfter === "number" && Number.isFinite(this.balanceAfter)) {
-    this.balanceAfter = Math.round(this.balanceAfter * 100) / 100;
-  }
-  next();
-});
+TransactionSchema.index({ provider: 1, createdAt: -1 });
+TransactionSchema.index({ type: 1, status: 1, createdAt: -1 });
 
 export const Transaction = mongoose.model("Transaction", TransactionSchema);

@@ -5,38 +5,88 @@ import express from "express";
 const router = Router();
 
 /**
- * Stripe webhook – MUST use RAW body
- * This router MUST be mounted BEFORE express.json() in app.js
+ * STRIPE WEBHOOK ROUTER (Full ausgestattet + safe)
  *
- * Endpoint (app.js):
- * app.use("/webhooks/stripe", stripeWebhooksRoutes);
+ * ✅ MUST use RAW body for signature verification
+ * ✅ MUST be mounted BEFORE express.json() in app.js
  *
- * So final URL is:
- * POST /webhooks/stripe
+ * app.js:
+ *   app.use("/webhooks/stripe", stripeWebhooksRoutes);
+ *
+ * Final URL:
+ *   POST /webhooks/stripe
  */
 
-// Optional quick ping (debug)
+// -------------------------
+// Helpers
+// -------------------------
+function safeStr(x) {
+  return String(x || "").trim();
+}
+
+function isStripeJson(req) {
+  const ct = safeStr(req.headers["content-type"]).toLowerCase();
+  // Stripe sends: application/json (sometimes includes charset)
+  return ct.startsWith("application/json");
+}
+
+function getSig(req) {
+  return req.headers["stripe-signature"];
+}
+
+// -------------------------
+// Debug ping
+// -------------------------
 router.get("/ping", (req, res) => {
-  res.json({ ok: true, provider: "stripe", time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    provider: "stripe",
+    time: new Date().toISOString(),
+  });
 });
 
+// -------------------------
+// Stripe webhook endpoint
+// -------------------------
 router.post(
   "/",
-  express.raw({ type: "application/json" }),
+  // Raw body is REQUIRED. Put a sane limit to avoid abuse.
+  express.raw({ type: "application/json", limit: "2mb" }),
   async (req, res) => {
     try {
-      // ✅ IMPORTANT: in your project stripe is here:
+      // 1) Basic guards (cheap checks before heavy logic)
+      if (!isStripeJson(req)) {
+        // Stripe expects 2xx? In practice Stripe sends JSON, but for safety:
+        return res.status(415).send("Unsupported content-type");
+      }
+
+      const sig = getSig(req);
+      if (!sig) {
+        // Stripe will retry if non-2xx; this is correct for missing signature
+        return res.status(400).send("Missing Stripe signature");
+      }
+
+      // 2) Import handler (keeps boot fast + avoids circular deps)
+      // Your project file:
       // server/src/services/payments/stripe.js
-      const { handleStripeWebhook } = await import(
-        "../services/payments/stripe.js"
-      );
+      const { handleStripeWebhook } = await import("../services/payments/stripe.js");
 
+      // 3) Delegate
+      // IMPORTANT: handleStripeWebhook should send the final response itself
+      // (or return an object and we send it here).
       await handleStripeWebhook(req, res);
-    } catch (err) {
-      console.error("❌ Stripe webhook error:", err?.stack || err);
 
-      // Stripe will retry on non-2xx → ok for failures
-      return res.status(400).send("Stripe webhook error");
+      // If handler already responded, do nothing.
+      if (res.headersSent) return;
+
+      // Fallback safe response
+      return res.status(200).json({ received: true });
+    } catch (err) {
+      console.error("❌ Stripe webhook route error:", err?.stack || err);
+
+      // Stripe retries on non-2xx (good).
+      // Keep body short.
+      if (!res.headersSent) return res.status(400).send("Stripe webhook error");
     }
   }
 );

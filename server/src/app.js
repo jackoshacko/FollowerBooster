@@ -23,7 +23,7 @@ import walletRoutes from "./routes/wallet.routes.js";
 import paypalPaymentsRoutes from "./routes/payments.paypal.routes.js";
 import paypalWebhooksRoutes from "./routes/webhooks.paypal.routes.js";
 
-// ✅ STRIPE (USER) — NEW
+// ✅ STRIPE (USER)
 import stripePaymentsRoutes from "./routes/payments.stripe.routes.js";
 import stripeWebhooksRoutes from "./routes/webhooks.stripe.routes.js";
 
@@ -63,6 +63,9 @@ function isAllowedByPattern(origin) {
 export function createApp({ corsOrigins = [] } = {}) {
   const app = express();
 
+  // hide framework header
+  app.disable("x-powered-by");
+
   // =====================================================
   // TRUST PROXY (ngrok / reverse proxies)
   // =====================================================
@@ -80,7 +83,7 @@ export function createApp({ corsOrigins = [] } = {}) {
     req.reqId = reqId;
     res.setHeader("x-request-id", reqId);
 
-    // small hardening
+    // small hardening (cheap + ok)
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
@@ -94,8 +97,13 @@ export function createApp({ corsOrigins = [] } = {}) {
     ? corsOrigins.map((s) => String(s || "").trim()).filter(Boolean)
     : [];
 
+  // ✅ prefer FRONTEND_URL (tvoj existing)
   const envFrontend = String(process.env.FRONTEND_URL || "").trim();
   if (envFrontend && !whitelist.includes(envFrontend)) whitelist.push(envFrontend);
+
+  // (optional) ako nekad koristiš CLIENT_URL umesto FRONTEND_URL
+  const envClient = String(process.env.CLIENT_URL || "").trim();
+  if (envClient && !whitelist.includes(envClient)) whitelist.push(envClient);
 
   // MUST vary by origin
   app.use((req, res, next) => {
@@ -156,18 +164,20 @@ export function createApp({ corsOrigins = [] } = {}) {
   // =====================================================
   // ✅ WEBHOOKS (MUST BE BEFORE JSON PARSER)
   // =====================================================
-  // PayPal webhooks (existing)
-  app.use("/webhooks", paypalWebhooksRoutes);
-
-  // Stripe webhook (NEW) — raw body handled inside stripeWebhooksRoutes
+  // IMPORTANT:
+  // - Stripe route ALREADY applies express.raw() inside router.post("/")
+  // - So here we only mount the router, no extra raw here (avoid double raw)
   // Endpoint: POST /webhooks/stripe
   app.use("/webhooks/stripe", stripeWebhooksRoutes);
 
+  // PayPal webhooks (existing)
+  app.use("/webhooks", paypalWebhooksRoutes);
+
   // =====================================================
-  // BODY PARSERS
+  // BODY PARSERS (AFTER WEBHOOKS)
   // =====================================================
-  app.use(express.json({ limit: "200kb" }));
-  app.use(express.urlencoded({ extended: true, limit: "200kb" }));
+  app.use(express.json({ limit: "1mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
   // =====================================================
   // ROOT
@@ -183,8 +193,9 @@ export function createApp({ corsOrigins = [] } = {}) {
       routes: {
         google: "/auth/google  -> /auth/google/callback",
         stripe: {
-          createIntent: "/payments/stripe/create-intent",
+          payments: "/payments/stripe/*",
           webhook: "/webhooks/stripe",
+          ping: "/webhooks/stripe/ping",
         },
       },
     });
@@ -196,10 +207,10 @@ export function createApp({ corsOrigins = [] } = {}) {
   app.use("/health", healthRoutes);
 
   // ✅ IMPORTANT ORDER:
-  // 1) mount Google OAuth routes FIRST (so /auth/google + /auth/google/callback always use this file)
+  // 1) mount Google OAuth routes FIRST
   app.use("/auth", authGoogleRoutes);
 
-  // 2) then mount normal auth routes (login/register/etc) — MUST NOT contain /google/callback anymore
+  // 2) then mount normal auth routes
   app.use("/auth", authRoutes);
 
   // public
@@ -215,8 +226,7 @@ export function createApp({ corsOrigins = [] } = {}) {
   // payments
   app.use("/payments/paypal", paypalPaymentsRoutes);
 
-  // ✅ STRIPE payments (NEW)
-  // Endpoint: POST /payments/stripe/create-intent
+  // ✅ STRIPE payments
   app.use("/payments/stripe", stripePaymentsRoutes);
 
   // admin

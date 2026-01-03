@@ -1,4 +1,5 @@
 // client/src/lib/api.js
+
 const API = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 /* ================= URL HELPERS ================= */
@@ -194,7 +195,9 @@ export async function request(path, options = {}) {
   const headers = {
     Accept: "application/json",
     ...(authHeader ? { Authorization: authHeader } : {}),
-    ...(hasBody && !(isForm || isBlob) && !isString ? { "Content-Type": "application/json" } : {}),
+    ...(hasBody && !(isForm || isBlob) && !isString
+      ? { "Content-Type": "application/json" }
+      : {}),
     ...(extraHeaders || {}),
   };
 
@@ -219,7 +222,9 @@ export async function request(path, options = {}) {
   // ngrok / wrong URL / proxy -> HTML
   if (looksLikeHtml(text) && !contentType.includes("application/json")) {
     const err = new Error(
-      `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(path)}`
+      `API returned HTML instead of JSON. (ngrok warning / wrong URL / proxy)\nURL: ${apiUrl(
+        path
+      )}`
     );
     err.status = res.status;
     err.data = { text };
@@ -250,7 +255,9 @@ export async function request(path, options = {}) {
         ? (text || "").slice(0, 300)
         : "";
 
-    const err = new Error(pickErrorMessage(json, fallbackText, `Request failed (${res.status})`));
+    const err = new Error(
+      pickErrorMessage(json, fallbackText, `Request failed (${res.status})`)
+    );
     err.status = res.status;
     err.data = json ?? { text };
     throw err;
@@ -302,7 +309,10 @@ export const api = {
   },
 
   register: async (payload) => {
-    const out = await request("/auth/register", { method: "POST", body: payload });
+    const out = await request("/auth/register", {
+      method: "POST",
+      body: payload,
+    });
     const t = extractToken(out);
     if (t) setToken(t);
 
@@ -333,6 +343,22 @@ export const api = {
   wallet: () => request("/wallet"),
   dashboard: () => request("/api/dashboard"),
 
-  paypalCreate: (payload) => request("/payments/paypal/create", { method: "POST", body: payload }),
-  paypalCapture: (payload) => request("/payments/paypal/capture", { method: "POST", body: payload }),
+  /* ===== PayPal ===== */
+  paypalCreate: (payload) =>
+    request("/payments/paypal/create", { method: "POST", body: payload }),
+  paypalCapture: (payload) =>
+    request("/payments/paypal/capture", { method: "POST", body: payload }),
+
+  /* ===== Stripe (NEW) =====
+     Stripe Checkout:
+     - backend vraća: { url }
+     - ti u page radiš: window.location.href = url
+  */
+  stripeCheckout: (payload) =>
+    request("/payments/stripe/checkout", { method: "POST", body: payload }),
+
+  // (opciono) ako imaš endpoint da proveriš session status
+  // npr GET /payments/stripe/session?session_id=...
+  stripeSession: (sessionId) =>
+    request(`/payments/stripe/session?session_id=${encodeURIComponent(sessionId || "")}`),
 };

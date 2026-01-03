@@ -4,69 +4,106 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 /**
- * WEBHOOK EVENT (Full ausgestattet)
+ * WEBHOOK EVENT (Full ausgestattet + safe)
  *
  * Purpose:
- * - Hard idempotency (no double processing)
- * - Audit/debug trail for payment provider events (PayPal now, extend later)
+ * - HARD idempotency (no double processing)
+ * - Audit/debug trail for payment provider events
+ * - Store minimal safe header snapshot + raw payload
  *
- * Design:
- * - We store the raw payload (Mixed) + optional headers snapshot
- * - We track lifecycle: received -> processed/ignored/failed
- * - eventId is the idempotency key (PayPal: event.id)
+ * Supports:
+ * - paypal
+ * - stripe
+ * (extend later) revolut, crypto...
  */
+
+function safeStr(x) {
+  return String(x ?? "").trim();
+}
+
+const PROVIDERS = ["paypal", "stripe"];
+const MODES = ["sandbox", "live", ""];
+
+/**
+ * Limit stored headers (avoid leaking sensitive info)
+ * Add more keys only if you truly need them for debugging.
+ */
+function sanitizeHeaders(h = {}) {
+  const headers = {};
+  const src = h || {};
+
+  // Normalize header keys (express uses lowercase)
+  const allow = [
+    "user-agent",
+    "content-type",
+    "stripe-signature",
+    "paypal-transmission-id",
+    "paypal-transmission-time",
+    "paypal-cert-url",
+    "paypal-auth-algo",
+    "paypal-transmission-sig",
+    "x-forwarded-for",
+    "x-real-ip",
+    "host",
+    "x-request-id",
+  ];
+
+  for (const k of allow) {
+    const v = src[k];
+    if (v !== undefined && v !== null && String(v).length) {
+      headers[k] = safeStr(v);
+    }
+  }
+  return headers;
+}
 
 const WebhookEventSchema = new Schema(
   {
     provider: {
       type: String,
-      enum: ["paypal"], // extend later: "stripe", "revolut", etc.
+      enum: PROVIDERS,
       required: true,
       index: true,
     },
 
     /**
-     * PayPal: event.id
-     * This should be unique and is our idempotency key.
+     * Idempotency key:
+     * - PayPal: event.id
+     * - Stripe: event.id
      */
-    eventId: { type: String, required: true, index: true },
+    eventId: { type: String, required: true, index: true, trim: true },
 
     /**
      * PayPal: event.event_type
+     * Stripe: event.type
      */
-    eventType: { type: String, default: "", index: true },
+    eventType: { type: String, default: "", index: true, trim: true },
 
     /**
-     * Helpful correlation id:
-     * - orderId or captureId (whatever we can extract)
+     * Correlation id:
+     * - PayPal: resource.id (order/capture/etc)
+     * - Stripe: object.id (payment_intent, charge, etc)
      */
-    resourceId: { type: String, default: "", index: true },
+    resourceId: { type: String, default: "", index: true, trim: true },
 
     /**
-     * Mode/source for audit:
-     * - sandbox / live
+     * "sandbox" / "live" / ""
      */
     mode: {
       type: String,
-      enum: ["sandbox", "live", ""],
+      enum: MODES,
       default: "",
       index: true,
     },
 
     /**
-     * Received vs processed timestamps:
-     * - receivedAt: when we stored the event
-     * - processedAt: when we actually handled it (confirm/credit/etc.)
+     * Received vs processed timestamps
      */
     receivedAt: { type: Date, default: Date.now, index: true },
     processedAt: { type: Date, default: null, index: true },
 
     /**
-     * Processing status:
-     * - received: stored but not processed (rare; if you queue)
-     * - processed: successfully handled
-     * - ignored: valid event but not relevant (e.g. non-payment)
-     * - failed: processing error (store error for later debug/retry)
+     * Lifecycle
      */
     status: {
       type: String,
@@ -84,35 +121,83 @@ const WebhookEventSchema = new Schema(
     },
 
     /**
-     * Raw provider payload
-     * (Mixed to allow any PayPal JSON structure)
+     * Raw provider payload (can be large)
      */
     payload: { type: Schema.Types.Mixed, default: {} },
 
     /**
-     * Optional debug: request headers snapshot (safe subset)
-     * Useful in LIVE for signature issues.
+     * SAFE subset of headers for signature debugging
      */
     headers: { type: Schema.Types.Mixed, default: {} },
+
+    /**
+     * Optional: internal debug/meta
+     */
+    meta: { type: Schema.Types.Mixed, default: {} },
+
+    /**
+     * OPTIONAL: TTL cleanup support (set expiresAt when writing)
+     */
+    expiresAt: { type: Date, default: null, index: true },
   },
   { timestamps: true }
 );
 
 /* =========================
-   INDEXES
+   HOOKS (safe normalization)
+========================= */
+
+WebhookEventSchema.pre("validate", function (next) {
+  this.provider = safeStr(this.provider).toLowerCase();
+
+  this.eventId = safeStr(this.eventId);
+  this.eventType = safeStr(this.eventType);
+  this.resourceId = safeStr(this.resourceId);
+
+  // sanitize headers snapshot
+  this.headers = sanitizeHeaders(this.headers || {});
+
+  // set mode if missing
+  if (!this.mode) {
+    // best-effort default:
+    // - production => live
+    // - otherwise => sandbox
+    this.mode =
+      String(process.env.NODE_ENV || "").toLowerCase() === "production"
+        ? "live"
+        : "sandbox";
+  }
+
+  next();
+});
+
+/* =========================
+   INDEXES (Idempotency + perf)
 ========================= */
 
 /**
  * HARD idempotency:
- * - PayPal eventId is globally unique, but keeping provider in index is fine too.
+ * unique by provider + eventId
  */
 WebhookEventSchema.index({ provider: 1, eventId: 1 }, { unique: true });
 
 /**
- * Helpful indexes for admin/debug screens
+ * Useful indexes for debugging/admin
  */
 WebhookEventSchema.index({ provider: 1, resourceId: 1, createdAt: -1 });
 WebhookEventSchema.index({ provider: 1, eventType: 1, createdAt: -1 });
 WebhookEventSchema.index({ status: 1, createdAt: -1 });
+WebhookEventSchema.index({ provider: 1, status: 1, createdAt: -1 });
+
+/**
+ * OPTIONAL TTL cleanup:
+ * - If you want auto delete old webhook events:
+ *   1) uncomment TTL index
+ *   2) when storing, set expiresAt = Date.now() + N days
+ *
+ * Example (30 days):
+ * expiresAt: new Date(Date.now() + 30*24*60*60*1000)
+ */
+// WebhookEventSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const WebhookEvent = mongoose.model("WebhookEvent", WebhookEventSchema);
