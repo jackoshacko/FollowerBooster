@@ -43,16 +43,13 @@ function money2(n) {
 function fmtMoney(n, cur = "EUR") {
   const x = safeNum(n, 0);
   try {
-    return `${x.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+    return `${x.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} ${cur}`;
   } catch {
     return `${money2(x)} ${cur}`;
   }
-}
-
-function cap(s) {
-  if (!s) return "";
-  const t = String(s);
-  return t.slice(0, 1).toUpperCase() + t.slice(1);
 }
 
 function shortId(id) {
@@ -82,6 +79,61 @@ function parseAmount(v) {
   const x = Number(String(v).replace(",", "."));
   if (!Number.isFinite(x)) return 0;
   return Math.round(x * 100) / 100;
+}
+
+function currencyToLower(cur) {
+  return String(cur || "EUR").trim().toLowerCase();
+}
+
+function clampTopupAmount(a) {
+  // safety policy aligned with backend (your stripe route uses MIN_CENTS=50)
+  // UI uses major units (EUR), so min 0.50
+  const min = 0.5;
+  const max = 5000;
+  const x = Number(a);
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(min, Math.min(max, Math.round(x * 100) / 100));
+}
+
+function amountToCents(amountMajor) {
+  const x = Number(amountMajor);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100);
+}
+
+/* =========================
+   Tiny Stripe mark (no image import)
+========================= */
+function StripeMark({ className = "" }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 w-5 items-center justify-center rounded-full",
+        "bg-[#635BFF]/20 border border-[#635BFF]/30",
+        className
+      )}
+      aria-label="Stripe"
+      title="Stripe"
+    >
+      <span className="h-2.5 w-2.5 rounded-full bg-[#635BFF]" />
+    </span>
+  );
+}
+
+function PayPalMark({ className = "" }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 w-5 items-center justify-center rounded-full",
+        "bg-sky-500/15 border border-sky-500/25",
+        className
+      )}
+      aria-label="PayPal"
+      title="PayPal"
+    >
+      <span className="text-[10px] font-black text-sky-100">P</span>
+    </span>
+  );
 }
 
 /* =========================
@@ -121,6 +173,7 @@ function Badge({ children, tone = "zinc", className = "" }) {
     red: "border-red-500/20 bg-red-500/10 text-red-100",
     violet: "border-violet-500/20 bg-violet-500/10 text-violet-100",
     purple: "border-purple-500/20 bg-purple-500/10 text-purple-100",
+    indigo: "border-indigo-500/20 bg-indigo-500/10 text-indigo-100",
   };
   return (
     <span
@@ -173,7 +226,12 @@ function Toast({ toast, onClose }) {
 
   return (
     <div className="fixed right-6 top-6 z-50 w-[min(360px,92vw)]">
-      <div className={cn("rounded-2xl border p-3 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]", tone)}>
+      <div
+        className={cn(
+          "rounded-2xl border p-3 backdrop-blur-xl shadow-[0_12px_30px_rgba(0,0,0,0.45)]",
+          tone
+        )}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-2">
             <Icon className="mt-0.5 h-4 w-4" />
@@ -209,14 +267,18 @@ function TxRow({ tx, onCopy }) {
   const id = tx?._id || tx?.id || tx?.providerOrderId || tx?.provider_order_id || "";
 
   const label =
-    type.includes("paypal") ? "PayPal top-up" :
-    type.includes("stripe") ? "Card top-up" :
-    type.includes("revolut") ? "Revolut top-up" :
-    type.includes("crypto") ? "Crypto top-up" :
-    "Transaction";
+    type.includes("paypal")
+      ? "PayPal top-up"
+      : type.includes("stripe")
+      ? "Card top-up"
+      : type.includes("revolut")
+      ? "Revolut top-up"
+      : type.includes("crypto")
+      ? "Crypto top-up"
+      : "Transaction";
 
   const badgeTone =
-    status === "completed" || status === "success"
+    status === "completed" || status === "confirmed" || status === "success"
       ? "emerald"
       : status === "pending"
       ? "amber"
@@ -295,7 +357,10 @@ export default function Wallet() {
   // topup
   const [amount, setAmount] = useState("10");
   const [currency, setCurrency] = useState("EUR");
-  const [paying, setPaying] = useState(false);
+
+  // PayPal + Stripe paying flags
+  const [payingPayPal, setPayingPayPal] = useState(false);
+  const [payingStripe, setPayingStripe] = useState(false);
 
   // toast + error
   const [toast, setToast] = useState(null); // {type,title,msg}
@@ -304,8 +369,14 @@ export default function Wallet() {
   const toastRef = useRef(null);
 
   const qs = useMemo(() => new URLSearchParams(loc.search), [loc.search]);
+
+  // PayPal status
   const paypalStatus = qs.get("paypal"); // success | fail | cancel | error | missing_order
   const paypalOrderId = qs.get("orderId");
+
+  // Stripe status (optional, in case you add return_url redirects later)
+  const stripeStatus = qs.get("stripe"); // success | cancel | fail
+  const stripeSessionId = qs.get("session_id");
 
   function showToast(t) {
     setToast(t);
@@ -344,26 +415,26 @@ export default function Wallet() {
     if (paypalStatus === "success") {
       showToast({
         type: "success",
-        title: "Payment completed ✅",
+        title: "PayPal payment completed ✅",
         msg: paypalOrderId ? `Order: ${paypalOrderId}` : "Funds will reflect instantly.",
       });
       loadWallet();
     } else if (paypalStatus === "cancel") {
       showToast({
         type: "info",
-        title: "Payment cancelled",
+        title: "PayPal cancelled",
         msg: "No worries — you can try again anytime.",
       });
     } else if (paypalStatus === "fail") {
       showToast({
         type: "error",
-        title: "Payment failed",
+        title: "PayPal failed",
         msg: "Something went wrong. Please try again.",
       });
     } else {
       showToast({
         type: "error",
-        title: "Payment error",
+        title: "PayPal error",
         msg: "We couldn't confirm the payment. Try again or contact support.",
       });
     }
@@ -371,6 +442,35 @@ export default function Wallet() {
     nav(loc.pathname, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paypalStatus]);
+
+  // Stripe status (optional) -> toast + cleanup URL
+  useEffect(() => {
+    if (!stripeStatus) return;
+
+    if (stripeStatus === "success") {
+      showToast({
+        type: "success",
+        title: "Card payment completed ✅",
+        msg: stripeSessionId ? `Session: ${stripeSessionId}` : "Funds will reflect instantly.",
+      });
+      loadWallet();
+    } else if (stripeStatus === "cancel") {
+      showToast({
+        type: "info",
+        title: "Card payment cancelled",
+        msg: "No worries — you can try again anytime.",
+      });
+    } else {
+      showToast({
+        type: "error",
+        title: "Card payment error",
+        msg: "We couldn't confirm the payment. Try again or contact support.",
+      });
+    }
+
+    nav(loc.pathname, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stripeStatus]);
 
   function preset(n) {
     setAmount(String(n));
@@ -383,15 +483,21 @@ export default function Wallet() {
     else showToast({ type: "error", title: "Clipboard blocked", msg: "Browser blocked clipboard access." });
   }
 
-  async function startPayPal() {
+  function validateAmountOrToast() {
     const a = parseAmount(amount);
-
     if (!a || a <= 0) {
       showToast({ type: "error", title: "Invalid amount", msg: "Enter a valid top-up amount." });
-      return;
+      return null;
     }
+    const clamped = clampTopupAmount(a);
+    return clamped;
+  }
 
-    setPaying(true);
+  async function startPayPal() {
+    const a = validateAmountOrToast();
+    if (!a) return;
+
+    setPayingPayPal(true);
     setErr("");
     try {
       const out = await api.post("/payments/paypal/create", { amount: a, currency });
@@ -399,10 +505,42 @@ export default function Wallet() {
       if (!approveUrl) throw new Error("Missing approveUrl from server");
       window.location.href = approveUrl;
     } catch (e) {
-      setPaying(false);
+      setPayingPayPal(false);
       showToast({
         type: "error",
-        title: "Could not start payment",
+        title: "Could not start PayPal",
+        msg: e?.message || "Try again in a moment.",
+      });
+    }
+  }
+
+  async function startStripe() {
+    const a = validateAmountOrToast();
+    if (!a) return;
+
+    // Stripe route expects cents + lowercase currency
+    const amountCents = amountToCents(a);
+    const cur = currencyToLower(currency);
+
+    setPayingStripe(true);
+    setErr("");
+    try {
+      // ✅ If your backend already has /payments/stripe/checkout (as your console test showed)
+      // it should return: { ok: true, url: "https://checkout.stripe.com/..." }
+      const out = await api.post("/payments/stripe/checkout", {
+        amountCents,
+        currency: cur,
+      });
+
+      const url = out?.url || out?.checkoutUrl;
+      if (!url) throw new Error("Missing Stripe checkout url from server");
+
+      window.location.href = url;
+    } catch (e) {
+      setPayingStripe(false);
+      showToast({
+        type: "error",
+        title: "Could not start card payment",
         msg: e?.message || "Try again in a moment.",
       });
     }
@@ -417,11 +555,20 @@ export default function Wallet() {
     });
   }
 
-  const spent = useMemo(() => txs.reduce((s, t) => s + safeNum(t?.amount ?? t?.delta ?? 0, 0), 0), [txs]);
-  const topups = useMemo(
-    () => txs.filter((t) => String(t?.type || t?.kind || t?.provider || "").toLowerCase().includes("top")).length,
+  const spent = useMemo(
+    () => txs.reduce((s, t) => s + safeNum(t?.amount ?? t?.delta ?? 0, 0), 0),
     [txs]
   );
+
+  const topups = useMemo(() => {
+    return txs.filter((t) => {
+      const k = String(t?.type || t?.kind || "").toLowerCase();
+      // you store: topup / topup_credit / etc.
+      return k.includes("topup");
+    }).length;
+  }, [txs]);
+
+  const payDisabled = payingPayPal || payingStripe;
 
   return (
     <div className="space-y-4">
@@ -468,7 +615,11 @@ export default function Wallet() {
         <GlassCard className="p-4">
           <div className="text-xs uppercase tracking-[0.18em] text-zinc-200/60">Balance</div>
           <div className="mt-2 text-2xl font-black text-white">
-            {loading ? <span className="inline-block h-7 w-28 rounded-full bg-white/10 animate-pulse" /> : fmtMoney(balance, currency)}
+            {loading ? (
+              <span className="inline-block h-7 w-28 rounded-full bg-white/10 animate-pulse" />
+            ) : (
+              fmtMoney(balance, currency)
+            )}
           </div>
         </GlassCard>
 
@@ -522,12 +673,18 @@ export default function Wallet() {
             <div>
               <div className="text-sm font-semibold text-white">Top up</div>
               <div className="mt-1 text-xs text-zinc-200/60">
-                Choose a preset or enter a custom amount — PayPal live now.
+                Choose a preset or enter a custom amount — PayPal + Card (Stripe) live.
               </div>
             </div>
-            <Badge tone="blue">
-              <ShieldCheck className="h-3.5 w-3.5" /> PayPal
-            </Badge>
+
+            <div className="flex items-center gap-2">
+              <Badge tone="blue">
+                <PayPalMark /> PayPal
+              </Badge>
+              <Badge tone="indigo">
+                <StripeMark /> Stripe
+              </Badge>
+            </div>
           </div>
 
           <div className="mt-4 grid gap-3">
@@ -551,6 +708,9 @@ export default function Wallet() {
                     inputMode="decimal"
                     className="w-full bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-200/40"
                   />
+                </div>
+                <div className="mt-2 text-[11px] text-zinc-200/55">
+                  Safety limits: min <b>0.50</b>, max <b>5000</b>.
                 </div>
               </div>
 
@@ -576,23 +736,56 @@ export default function Wallet() {
               </div>
             </div>
 
-            <button
-              onClick={startPayPal}
-              disabled={paying}
-              className={cn(
-                "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-black transition",
-                "bg-amber-500 text-black hover:bg-amber-400",
-                paying ? "opacity-70 cursor-not-allowed" : ""
-              )}
-              type="button"
-            >
-              <CreditCard className="h-4 w-4" />
-              {paying ? "Redirecting to PayPal…" : "Add funds with PayPal"}
-              <ArrowUpRight className="h-4 w-4" />
-            </button>
+            {/* PAY BUTTONS (same styling, safe, mobile-friendly) */}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                onClick={startPayPal}
+                disabled={payDisabled}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-black transition",
+                  "bg-amber-500 text-black hover:bg-amber-400",
+                  payDisabled ? "opacity-70 cursor-not-allowed" : ""
+                )}
+                type="button"
+              >
+                <PayPalMark />
+                {payingPayPal ? "Redirecting…" : "Pay with PayPal"}
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
 
-            <div className="text-xs text-zinc-200/60">
-              Funds are credited after confirmation. Webhooks will enforce idempotency (event.id) on live.
+              <button
+                onClick={startStripe}
+                disabled={payDisabled}
+                className={cn(
+                  "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-black transition",
+                  "bg-[#635BFF] text-white hover:brightness-110",
+                  payDisabled ? "opacity-70 cursor-not-allowed" : ""
+                )}
+                type="button"
+              >
+                <StripeMark className="bg-white/10 border-white/15" />
+                {payingStripe ? "Redirecting…" : "Pay with Card"}
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-200/70">
+                  <Badge tone="emerald">
+                    <ShieldCheck className="h-3.5 w-3.5" /> Webhook verified
+                  </Badge>
+                  <Badge tone="blue">
+                    <BadgeCheck className="h-3.5 w-3.5" /> Idempotent credits
+                  </Badge>
+                  <Badge tone="violet">
+                    <Sparkles className="h-3.5 w-3.5" /> Safe flow
+                  </Badge>
+                </div>
+                <div className="mt-2 text-xs text-zinc-200/60">
+                  Funds are credited after confirmation. Provider webhooks enforce idempotency (no double credits).
+                </div>
+              </div>
             </div>
           </div>
 
@@ -678,17 +871,11 @@ export default function Wallet() {
             ) : txs.length === 0 ? (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
                 <div className="text-sm font-semibold text-white">No transactions yet</div>
-                <div className="mt-1 text-xs text-zinc-200/60">
-                  Top up your wallet to get started.
-                </div>
+                <div className="mt-1 text-xs text-zinc-200/60">Top up your wallet to get started.</div>
               </div>
             ) : (
               txs.map((t) => (
-                <TxRow
-                  key={t?._id || t?.id || JSON.stringify(t)}
-                  tx={t}
-                  onCopy={onCopy}
-                />
+                <TxRow key={t?._id || t?.id || JSON.stringify(t)} tx={t} onCopy={onCopy} />
               ))
             )}
           </div>
@@ -697,8 +884,8 @@ export default function Wallet() {
             <div className="flex items-start gap-2 text-xs text-zinc-200/60">
               <Info className="mt-0.5 h-4 w-4" />
               <div className="min-w-0">
-                Pro tip: for live launch we’ll store PayPal webhook <b>event.id</b> + provider order id mapping to guarantee
-                <b> idempotent credits</b> (no double credits, no missed credits).
+                Live safety: we store provider webhook <b>event.id</b> + provider order id mapping to guarantee{" "}
+                <b>idempotent credits</b> (no double credits, no missed credits).
               </div>
             </div>
           </div>
