@@ -63,6 +63,28 @@ const inputCls = cls(
   "focus:border-white/20 focus:bg-white/10"
 );
 
+/* =======================
+   Cloudflare Turnstile
+======================= */
+
+// ✅ stavi tvoj SITE KEY ovde
+const TURNSTILE_SITE_KEY = "0x4AAAAAAACkWeLnKEIxFJtcP";
+
+// optional: add script if nije već u index.html
+function ensureTurnstileScript() {
+  if (typeof window === "undefined") return;
+  if (window.turnstile) return;
+
+  const existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]');
+  if (existing) return;
+
+  const s = document.createElement("script");
+  s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+  s.async = true;
+  s.defer = true;
+  document.head.appendChild(s);
+}
+
 export default function Login() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -77,9 +99,61 @@ export default function Login() {
   const [err, setErr] = useState("");
   const [capsOn, setCapsOn] = useState(false);
 
+  // ✅ Turnstile token + widget id (za reset)
+  const [tsToken, setTsToken] = useState("");
+  const [tsWidgetId, setTsWidgetId] = useState(null);
+
   useEffect(() => {
     if (!password) setCapsOn(false);
   }, [password]);
+
+  // ✅ mount Turnstile (explicit render) kad se script učita
+  useEffect(() => {
+    ensureTurnstileScript();
+
+    let tries = 0;
+    let cancelled = false;
+
+    const mount = () => {
+      if (cancelled) return;
+
+      const el = document.getElementById("cf-turnstile-login");
+      if (!el) return;
+
+      if (!window.turnstile || typeof window.turnstile.render !== "function") {
+        tries += 1;
+        if (tries < 120) setTimeout(mount, 100); // čekaj do ~12s
+        return;
+      }
+
+      // ako je već renderovan, ne renderuj opet
+      if (tsWidgetId != null) return;
+
+      const wid = window.turnstile.render("#cf-turnstile-login", {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token) => {
+          setTsToken(String(token || ""));
+        },
+        "expired-callback": () => {
+          setTsToken("");
+        },
+        "error-callback": () => {
+          setTsToken("");
+        },
+        // theme: "dark", // optional
+      });
+
+      setTsWidgetId(wid);
+    };
+
+    mount();
+
+    return () => {
+      cancelled = true;
+      // ne radimo remove widget-a ovde da ne bug-uje na route transitions
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tsWidgetId]);
 
   async function submit(e) {
     e.preventDefault();
@@ -92,10 +166,20 @@ export default function Login() {
       return setErr("Please enter a valid email address (example: you@example.com).");
     if (!password) return setErr("Please enter your password.");
 
+    // ✅ Turnstile check
+    if (!tsToken) {
+      return setErr("Please verify you are human (Turnstile).");
+    }
+
     setLoading(true);
 
     try {
-      const data = await api.login({ email: normalizedEmail, password });
+      // ✅ šaljemo turnstileToken backend-u
+      const data = await api.login({
+        email: normalizedEmail,
+        password,
+        turnstileToken: tsToken,
+      });
 
       const accessToken = data?.accessToken || data?.token;
       if (!accessToken) throw new Error("Login response missing accessToken");
@@ -132,6 +216,12 @@ export default function Login() {
     } catch (e2) {
       setErr(e2?.message || "Login failed");
       clearAuthLocal();
+
+      // ✅ reset Turnstile posle fail-a (da ne ostane "stari" token)
+      try {
+        if (window.turnstile && tsWidgetId != null) window.turnstile.reset(tsWidgetId);
+      } catch {}
+      setTsToken("");
     } finally {
       setLoading(false);
     }
@@ -147,7 +237,7 @@ export default function Login() {
     window.location.href = apiUrl(`/auth/google${qs}`);
   }
 
-  const canSubmit = isValidEmail(email) && password.length > 0 && !loading;
+  const canSubmit = isValidEmail(email) && password.length > 0 && !loading && !!tsToken;
 
   return (
     // ✅ CONTENT-ONLY: PublicLayout already provides background + topbar + scroll container
@@ -321,6 +411,17 @@ export default function Login() {
                     autoComplete="current-password"
                   />
                 </Field>
+
+                {/* ✅ TURNSTILE (no UI redesign, just placed cleanly) */}
+                <div className="pt-1">
+                  <div
+                    id="cf-turnstile-login"
+                    className="min-h-[65px] rounded-2xl border border-white/10 bg-white/5 px-3 py-3 backdrop-blur-xl"
+                  />
+                  <div className="mt-2 text-[11px] text-zinc-300/60">
+                    Protected by Cloudflare Turnstile.
+                  </div>
+                </div>
 
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <label className="flex items-center gap-2 text-sm text-zinc-200/75 select-none">
